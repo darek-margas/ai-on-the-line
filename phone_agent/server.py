@@ -1,0 +1,472 @@
+"""MCP server (tools for Claude) plus a small status page, and the AudioSocket listener."""
+
+import asyncio
+import html
+import logging
+import os
+import re
+import time
+from datetime import datetime
+from urllib.parse import parse_qs
+from zoneinfo import ZoneInfo
+
+import uvicorn
+from mcp.server.mcpserver import MCPServer
+from pydantic import BaseModel, Field
+from starlette.requests import Request
+from starlette.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+
+from .ari import Ari
+from .auth import TokenAuth
+from .calls import CallManager
+from .config import Config
+from .db import Database
+from .dialog import DEFAULT_MUST_NOT, Brief, Dialog
+from .speech import Speech
+
+log = logging.getLogger(__name__)
+
+INSTRUCTIONS = """\
+Places real outbound phone calls. A voice agent holds the conversation from a brief you write, \
+then returns the answers it collected, notes and a full transcript.
+
+Workflow:
+1. Find who to call and their numbers yourself (e.g. web search). Confirm the list with the user \
+if anything is ambiguous.
+2. For each call, write a brief: a specific goal, an opening line that introduces the agent as \
+the owner's assistant calling on their behalf (it never claims to be the owner, and says it's an AI \
+if asked), the questions to get answered (short snake_case names \
+plus what exactly to find out), and what the agent may share. Keep questions few and concrete.
+3. place_call returns a call_id immediately. Calls take minutes: poll get_call(call_id, \
+wait_seconds=45) until status is finished, not_answered or failed. Calls run one at a time by \
+default; extra place_call requests queue.
+4. Read the transcript, not just the answers: speech recognition makes mistakes, and the agent \
+may have misread something. Re-call (later) if answers are missing or the callee asked to ring \
+back. Respect calling hours.
+5. The agent never books or pays. When done, write the report for the user: summary first, \
+comparison of what each callee said, what's still unknown, and link each call's status page.
+"""
+
+
+class Question(BaseModel):
+    name: str = Field(description="Short snake_case key, e.g. price_per_night")
+    description: str = Field(description="Exactly what to find out, e.g. 'total price per night for 5 people, in AUD'")
+
+
+QUESTION_FILLER = set(
+    "what which who whom whose when where why how is are was were do does did can could would will "
+    "you your yours the a an of to in on for it its there their they them me my please".split()
+)
+
+
+def question_names(lines: list[str]) -> dict[str, str]:
+    """'What is your favourite colour?' -> {'favourite_colour': '...'}; names stay unique."""
+    questions: dict[str, str] = {}
+    for line in lines:
+        words = [w for w in re.findall(r"[a-z0-9]+", line.lower()) if w not in QUESTION_FILLER]
+        base = "_".join(words[:3]) or "question"
+        name, n = base, 2
+        while name in questions:
+            name, n = f"{base}_{n}", n + 1
+        questions[name] = line.strip()
+    return questions
+
+
+def summarize(call: dict, base_url: str) -> dict:
+    duration = None
+    if call.get("started") and call.get("ended"):
+        duration = round(call["ended"] - call["started"])
+    return {
+        "call_id": call["id"],
+        "callee": call["callee"],
+        "phone": call["phone"],
+        "status": call["status"],
+        "outcome": call["outcome"],
+        "answers": call["answers"] or {},
+        "notes": call["notes"] or [],
+        "transcript": [f"{'Agent' if who == 'agent' else 'Callee'}: {text}" for who, text in call["transcript"] or []],
+        "duration_seconds": duration,
+        "error": call["error"],
+        "page": f"{base_url}/calls/{call['id']}",
+    }
+
+
+def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, dialog: Dialog, ari: Ari) -> MCPServer:
+    mcp = MCPServer("phone-agent", instructions=INSTRUCTIONS)
+    base_url = os.environ.get("PUBLIC_URL", f"http://localhost:{cfg.http_port}").rstrip("/")
+
+    @mcp.tool()
+    async def place_call(
+        phone: str,
+        callee: str,
+        goal: str,
+        opening_line: str,
+        questions: list[Question],
+        may_share: list[str] | None = None,
+        must_not: list[str] | None = None,
+        context: str = "",
+        callee_timezone: str | None = None,
+        ignore_calling_hours: bool = False,
+    ) -> dict:
+        """Start a phone call. Returns a call_id immediately; poll get_call for the result.
+
+        Args:
+            phone: Number to dial, e.g. "+61 8 8672 5555" or "08 8672 5555".
+            callee: Who you're calling, e.g. "Riverside Motel reception".
+            goal: One or two sentences: what this call should achieve.
+            opening_line: First thing the agent says after they answer. Must introduce it as the owner's assistant (e.g. "Hi, I'm Alex's assistant") and say why it's calling.
+            questions: What to get answered. Keep it to the essentials.
+            may_share: Facts the agent may tell the callee (dates, party size, the owner's name, callback number...).
+            must_not: Extra things the agent must never do. Booking, paying and committing are always forbidden.
+            context: Background that helps the agent handle follow-up questions.
+            callee_timezone: IANA zone if the callee isn't in the default zone, for the calling-hours check.
+            ignore_calling_hours: Only for test calls to the owner's own phone.
+        """
+        return start_call(
+            phone, callee, goal, opening_line, {q.name: q.description for q in questions},
+            may_share, must_not, context, callee_timezone, ignore_calling_hours,
+        )
+
+    def start_call(
+        phone: str,
+        callee: str,
+        goal: str,
+        opening_line: str,
+        questions: dict[str, str],
+        may_share: list[str] | None,
+        must_not: list[str] | None,
+        context: str,
+        callee_timezone: str | None,
+        ignore_calling_hours: bool,
+    ) -> dict:
+        """Shared by the MCP tool and the test-call form."""
+        if not questions:
+            return {"error": "Give at least one question."}
+        internal = len(re.sub(r"\D", "", phone)) <= 5  # an extension, not an outside number
+        zone = ZoneInfo(callee_timezone or cfg.timezone)
+        now = datetime.now(zone)
+        start, end = cfg.call_hours
+        if not (ignore_calling_hours or internal) and not (start <= now.strftime("%H:%M") < end):
+            return {
+                "error": f"It's {now:%H:%M} {zone.key} for the callee; calling hours are {start}-{end}. Try later.",
+            }
+        # It must introduce itself as someone's assistant, never as the owner.
+        if "assistant" not in opening_line.lower():
+            opening_line = f"Hi, I'm calling as {cfg.owner_name}'s assistant. {opening_line}"
+        brief = Brief(
+            goal=goal,
+            callee=callee,
+            opening_line=opening_line,
+            questions=questions,
+            may_share=may_share or [],
+            must_not=DEFAULT_MUST_NOT + (must_not or []),
+            context=context,
+        )
+        try:
+            call = manager.start_call(phone, brief)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        return {"call_id": call.id, "status": call.status, "page": f"{base_url}/calls/{call.id}"}
+
+    @mcp.tool()
+    async def get_call(call_id: str, wait_seconds: int = 45) -> dict:
+        """Get a call's status and results, waiting up to wait_seconds (max 55) for it to finish first."""
+        await manager.wait(call_id, min(max(wait_seconds, 0), 55))
+        call = manager.get(call_id)
+        if call is None:
+            return {"error": f"no call {call_id}"}
+        return summarize(call, base_url)
+
+    @mcp.tool()
+    async def list_calls(limit: int = 20) -> list[dict]:
+        """Recent calls, newest first (without transcripts)."""
+        return [
+            {k: v for k, v in summarize(c, base_url).items() if k != "transcript"}
+            for c in db.recent_calls(limit)
+        ]
+
+    @mcp.tool()
+    async def hang_up(call_id: str) -> dict:
+        """End a call that's ringing or in progress."""
+        return {"hung_up": await manager.hang_up(call_id)}
+
+    @mcp.tool()
+    async def check_setup() -> dict:
+        """Test Piper, Whisper, Asterisk ARI and the dialog LLM, with timings. Run this first after setup."""
+        results: dict[str, str] = {}
+
+        async def timed(name, coro):
+            t0 = time.monotonic()
+            try:
+                value = await coro
+                results[name] = f"ok, {(time.monotonic() - t0) * 1000:.0f} ms"
+                return value
+            except Exception as exc:
+                results[name] = f"FAILED: {exc!r}"
+
+        speech.clear_cache()
+        pcm = await timed("tts_piper", speech.synthesize("Hello, I'd like to ask about room availability for five people."))
+        if pcm:
+            text = await timed("stt_whisper", speech.transcribe(pcm))
+            results["stt_heard"] = repr(text)
+        info = await timed("ari", ari.info())
+        if info:
+            results["asterisk"] = info.get("system", {}).get("version", "?")
+        await timed("dialog_llm_load", dialog.warm_up())
+        brief = Brief(goal="Test", callee="Test", opening_line="Hi", questions={"availability": "Is there a room free?"})
+        turn = await timed(
+            "dialog_llm",
+            dialog.next_turn(brief, [("agent", "Hi, do you have a room tonight?"), ("callee", "Yes, one double left.")], {}, "The callee just spoke."),
+        )
+        if turn:
+            results["dialog_reply"] = turn.say
+        return results
+
+    # Status page
+
+    @mcp.custom_route("/inbound", methods=["POST"])
+    async def inbound(request: Request) -> Response:
+        """Called by the dialplan (CURL) before it hands us an incoming call.
+        Replies "ok", or an error so the dialplan can send the call elsewhere."""
+        form = parse_qs((await request.body()).decode(), keep_blank_values=True)
+        get = lambda key: form.get(key, [""])[0].strip()
+        try:
+            call = await manager.register_inbound(get("uuid"), get("caller"), get("diverted"), get("profile") or "screener")
+        except (ValueError, RuntimeError) as exc:
+            log.warning("inbound call refused: %s", exc)
+            return Response(str(exc), status_code=409, media_type="text/plain")
+        log.info("inbound call %s from %r (diverted from %r)", call.id, call.phone, get("diverted"))
+        return Response("ok", media_type="text/plain")
+
+    tz = ZoneInfo(cfg.timezone)
+
+    def when(ts: float | None, fmt: str = "%a %d %b, %H:%M") -> str:
+        return datetime.fromtimestamp(ts, tz).strftime(fmt) if ts else ""
+
+    @mcp.custom_route("/", methods=["GET"])
+    async def index(request: Request) -> Response:
+        rows = "".join(
+            f"<tr><td class='nowrap'>{when(c['created'])}</td>"
+            f"<td>{direction_icon(c)}</td>"
+            f"<td><a href='/calls/{c['id']}'>{html.escape(who_called(c))}</a>"
+            f"<div class='muted'>{html.escape(c['phone'])}{' · forwarded' if 'forwarded' in (c['callee'] or '') else ''}</div></td>"
+            f"<td class='nowrap num'>{duration(c)}</td><td>{badge(c)}</td></tr>"
+            for c in db.recent_calls(100)
+        )
+        body = (
+            "<h1>Calls</h1>"
+            "<div class='scroll'><table><tr><th>When</th><th></th><th>Who</th><th>Length</th><th>Result</th></tr>"
+            f"{rows or '<tr><td colspan=5 class=muted>No calls yet.</td></tr>'}</table></div>"
+            f"<p class='muted'>Times are {html.escape(cfg.timezone)}.</p>"
+        )
+        return HTMLResponse(page("Phone agent", body, refresh=True))
+
+    @mcp.custom_route("/test", methods=["GET", "POST"])
+    async def test_call(request: Request) -> Response:
+        """A form for trying the agent out without Claude: one question per line."""
+        error = ""
+        form = {
+            "phone": "101",
+            "callee": "Test",
+            "opening_line": f"Hi, I'm {cfg.owner_name}'s assistant. "
+                            "I have a few quick questions, if that's okay.",
+            "goal": "",
+            "questions": "",
+            "may_share": "",
+        }
+        if request.method == "POST":
+            posted = parse_qs((await request.body()).decode(), keep_blank_values=True)
+            form.update({k: v[0].strip() for k, v in posted.items() if k in form})
+            questions = question_names([l for l in form["questions"].splitlines() if l.strip()])
+            result = start_call(
+                form["phone"], form["callee"], form["goal"] or "Get answers to the questions.",
+                form["opening_line"], questions,
+                [l.strip() for l in form["may_share"].splitlines() if l.strip()], None, "", None, False,
+            )
+            if "call_id" in result:
+                return RedirectResponse(f"/calls/{result['call_id']}", status_code=303)
+            error = result["error"]
+        esc = html.escape
+        body = (
+            "<h1>Test call</h1>"
+            + (f"<p class='error'>{esc(error)}</p>" if error else "")
+            + "<form method='post'>"
+            f"<label>Number or extension<input name='phone' value='{esc(form['phone'])}' required></label>"
+            f"<label>Who you're calling<input name='callee' value='{esc(form['callee'])}'></label>"
+            f"<label>First thing it says<textarea name='opening_line' rows='2'>{esc(form['opening_line'])}</textarea></label>"
+            f"<label>Goal (what the call is for)<input name='goal' value='{esc(form['goal'])}'></label>"
+            f"<label>Questions, one per line<textarea name='questions' rows='5' required>{esc(form['questions'])}</textarea></label>"
+            f"<label>Things it may tell them, one per line<textarea name='may_share' rows='3'>{esc(form['may_share'])}</textarea></label>"
+            "<button>Call</button></form>"
+            "<p>Extensions (up to 5 digits) can be called any time; outside numbers only within calling hours.</p>"
+        )
+        return HTMLResponse(page("Test call", body))
+
+    @mcp.custom_route("/calls/{call_id}", methods=["GET"])
+    async def call_page(request: Request) -> Response:
+        call = manager.get(request.path_params["call_id"])
+        if call is None:
+            return HTMLResponse("Not found", status_code=404)
+        esc = html.escape
+        brief = call["brief"]
+        inbound = brief.get("direction") == "inbound"
+        answers = "".join(
+            f"<tr><th>{esc(k.replace('_', ' '))}</th><td>{esc(v)}</td></tr>" for k, v in (call["answers"] or {}).items()
+        )
+        notes = "".join(f"<li>{esc(n)}</li>" for n in call["notes"] or [])
+        other = "Caller" if inbound else "Callee"
+        lines = "".join(
+            f"<div class='line {who}'><span class='who'>{'Agent' if who == 'agent' else other}</span>{esc(text)}</div>"
+            for who, text in call["transcript"] or []
+        )
+        audio = ""
+        if cfg.recordings_dir and call["recording"]:
+            audio = f"<audio controls src='/recordings/{call['id']}.wav'></audio>"
+        started = when(call["started"] or call["created"], "%A %d %B %Y, %H:%M:%S")
+        body = (
+            f"<h1>{direction_icon(call)} {esc(call['callee'] or '')}</h1>"
+            f"<p class='meta'>{badge(call)} <span>{esc(call['phone'])}</span> <span>{started}</span>"
+            f"{f'<span>{duration(call)}</span>' if duration(call) else ''}</p>"
+            f"{'<p class=error>' + esc(call['error']) + '</p>' if call['error'] else ''}{audio}"
+            f"<h2>Goal</h2><p>{esc(brief['goal'])}</p>"
+            f"<h2>{'What they said' if inbound else 'Answers'}</h2>"
+            f"<table class='answers'>{answers or '<tr><td class=muted>none yet</td></tr>'}</table>"
+            f"{'<h2>Notes</h2><ul>' + notes + '</ul>' if notes else ''}"
+            f"<h2>Transcript</h2><div class='transcript'>{lines or '<p class=muted>none yet</p>'}</div>"
+        )
+        live = call["status"] not in ("finished", "not_answered", "failed")
+        return HTMLResponse(page(call["callee"] or "Call", body, refresh=live))
+
+    @mcp.custom_route("/recordings/{call_id}.wav", methods=["GET"])
+    async def recording(request: Request) -> Response:
+        call = manager.get(request.path_params["call_id"])
+        if not (cfg.recordings_dir and call and call["recording"]):
+            return Response(status_code=404)
+        path = os.path.join(cfg.recordings_dir, call["recording"])
+        if not os.path.isfile(path):
+            return Response(status_code=404)
+        return FileResponse(path, media_type="audio/wav")
+
+    return mcp
+
+
+PHONE_SVG = (
+    "<svg viewBox='0 0 24 24' width='{size}' height='{size}' aria-hidden='true'><path fill='currentColor' d='M6.6 10.8a15.1 "
+    "15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 "
+    "1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z'/></svg>"
+)
+FAVICON = (
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' "
+    "rx='6' fill='%232f6fb3'/%3E%3Cpath fill='white' transform='translate(3 3) scale(.75)' d='M6.6 10.8a15.1 15.1 0 0 0 6.6 "
+    "6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 "
+    "0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z'/%3E%3C/svg%3E"
+)
+LIVE = {"queued", "dialing", "ringing", "connected"}
+GOOD = {"completed"}
+BAD = {"failed", "technical_failure"}
+
+
+def duration(call: dict) -> str:
+    """'2:05' for a call that ran two minutes and five seconds; '' if it never connected."""
+    if not call.get("started"):
+        return ""
+    seconds = round((call.get("ended") or time.time()) - call["started"])
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def badge(call: dict) -> str:
+    """The call's result as a coloured label: live, its outcome, or how it failed."""
+    label = call["status"] if call["status"] in LIVE or not call["outcome"] else call["outcome"]
+    kind = "live" if call["status"] in LIVE else "good" if label in GOOD else "bad" if label in BAD or call["status"] in BAD else "plain"
+    return f"<span class='badge {kind}'>{html.escape(label.replace('_', ' '))}</span>"
+
+
+def who_called(call: dict) -> str:
+    """Outgoing: who we called. Incoming: who the screener found was calling."""
+    if (call.get("brief") or {}).get("direction") != "inbound":
+        return call["callee"] or ""
+    answers = call.get("answers") or {}
+    return ", ".join(a for a in (answers.get("caller_name"), answers.get("organisation")) if a) or "Unknown caller"
+
+
+def direction_icon(call: dict) -> str:
+    if (call.get("brief") or {}).get("direction") == "inbound":
+        return "<span class='dir in' title='Incoming: answered by the agent'>&#8601;</span>"
+    return "<span class='dir out' title='Outgoing: placed by the agent'>&#8599;</span>"
+
+
+def page(title: str, body: str, refresh: bool = False) -> str:
+    meta = "<meta http-equiv='refresh' content='5'>" if refresh else ""
+    return f"""<!doctype html><html><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>{meta}
+<link rel='icon' href="{FAVICON}">
+<title>{html.escape(title)}</title><style>
+:root {{ color-scheme: light dark; --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6ea;
+  --accent: #2f6fb3; --good: #1f8a4c; --bad: #c0392b; --live: #2f6fb3; --agent: #eaf2fb; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg: #14171c; --card: #1c2027; --text: #e6e8eb; --muted: #9aa3ad;
+  --line: #2c323b; --accent: #6aa5e8; --good: #4cc282; --bad: #ef6b5b; --live: #6aa5e8; --agent: #1f2c3d; }} }}
+* {{ box-sizing: border-box; }}
+body {{ font: 15px/1.5 system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); }}
+header {{ background: var(--card); border-bottom: 1px solid var(--line); }}
+header div, main {{ max-width: 900px; margin: 0 auto; padding: 12px 16px; }}
+header div {{ display: flex; align-items: center; gap: 16px; }}
+header a {{ color: var(--text); text-decoration: none; }}
+header .brand {{ display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--accent); margin-right: auto; }}
+main {{ padding-top: 8px; }}
+a {{ color: var(--accent); }}
+h1 {{ font-size: 22px; margin: 16px 0 8px; }}
+h2 {{ font-size: 16px; margin: 24px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }}
+.scroll {{ overflow-x: auto; }}
+table {{ border-collapse: collapse; width: 100%; background: var(--card); border-radius: 8px; }}
+th, td {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }}
+th {{ font-size: 13px; color: var(--muted); font-weight: 600; }}
+table.answers th {{ width: 30%; text-transform: capitalize; color: var(--text); }}
+.nowrap {{ white-space: nowrap; }} .num {{ font-variant-numeric: tabular-nums; }}
+.muted {{ color: var(--muted); font-size: 13px; }}
+.badge {{ display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  border: 1px solid currentColor; color: var(--muted); }}
+.badge.good {{ color: var(--good); }} .badge.bad {{ color: var(--bad); }}
+.badge.live {{ color: var(--live); animation: pulse 1.5s infinite; }}
+@keyframes pulse {{ 50% {{ opacity: .45; }} }}
+.dir {{ font-weight: 700; font-size: 17px; }} .dir.in {{ color: var(--good); }} .dir.out {{ color: var(--accent); }}
+.meta {{ display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; color: var(--muted); }}
+.transcript {{ display: flex; flex-direction: column; gap: 6px; }}
+.line {{ background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; max-width: 85%; }}
+.line.agent {{ background: var(--agent); align-self: flex-end; }}
+.line .who {{ display: block; font-size: 12px; font-weight: 600; color: var(--muted); }}
+.error {{ color: var(--bad); font-weight: 600; }}
+label {{ display: block; margin: 12px 0; font-weight: 600; }}
+input, textarea {{ display: block; width: 100%; margin-top: 4px; padding: 8px; font: inherit; font-weight: normal;
+  background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }}
+button {{ padding: 10px 24px; font: inherit; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff;
+  border: 0; border-radius: 6px; }}
+audio {{ width: 100%; }}
+</style></head><body>
+<header><div><a class='brand' href='/'>{PHONE_SVG.format(size=22)} Phone agent</a><a href='/'>Calls</a><a href='/test'>Test call</a></div></header>
+<main>{body}</main></body></html>"""
+
+
+async def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    cfg = Config.from_env()
+    if not cfg.api_token and os.environ.get("ALLOW_NO_AUTH", "").lower() != "true":
+        # Without a token, anyone who can reach the port can phone people on your line.
+        raise SystemExit("API_TOKEN is not set. Set one (openssl rand -hex 32), or ALLOW_NO_AUTH=true on a trusted network.")
+    db = Database(cfg.data_dir)
+    db.fail_unfinished_calls()
+    speech = Speech(cfg.stt, cfg.tts, cfg.stt_language, cfg.tts_voice, cfg.audio_rate, cfg.tts_pronounce)
+    dialog = Dialog(cfg.dialog_llm, cfg.owner_name, cfg.ollama_url, cfg.ollama_keep_alive)
+    ari = Ari(cfg.ari_url, cfg.ari_user, cfg.ari_password)
+    manager = CallManager(cfg, db, speech, dialog, ari)
+    mcp = build_app(cfg, manager, db, speech, dialog, ari)
+
+    audiosocket = await asyncio.start_server(manager.handle_audiosocket, *cfg.audiosocket_bind)
+    log.info("AudioSocket listening on %s:%s", *cfg.audiosocket_bind)
+    app = mcp.streamable_http_app(host=cfg.http_host)
+    if cfg.api_token:
+        app = TokenAuth(app, cfg.api_token)
+    else:
+        log.warning("API_TOKEN is not set: anyone who can reach port %s can place calls", cfg.http_port)
+    server = uvicorn.Server(uvicorn.Config(app, host=cfg.http_host, port=cfg.http_port, log_level="info"))
+    async with audiosocket:
+        await server.serve()

@@ -1,0 +1,34 @@
+services:
+  phone-agent:
+    build: .
+    image: phone-agent:latest
+    container_name: phone-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+      # Optional, for secrets kept apart from .env (e.g. ANTHROPIC_API_KEY).
+      - path: secrets.env
+        required: false
+    ports:
+      - "8090:8090"   # MCP (/mcp) and status page (/)
+      - "9092:9092"   # AudioSocket, reached by Asterisk
+    volumes:
+      - ./data:/data
+      # Optional: FreePBX recordings, to play them on the status page.
+      # - /mnt/freepbx-monitor:/recordings:ro
+
+  # The agent's own Piper, so its speaking speed can differ from Home
+  # Assistant's. Use it with WYOMING_TTS=piper:10200 in .env.
+  piper:
+    # Pinned: a new Piper release shouldn't change how calls sound without you noticing.
+    image: rhasspy/wyoming-piper@sha256:7d39aafac409c2b6b09d999ed04d84c311d632e558b35baa60fad6aac722af7a
+    container_name: phone-agent-piper
+    restart: unless-stopped
+    command: >
+      --voice ${PIPER_VOICE:-en_GB-jenny_dioco-medium}
+      --length-scale ${PIPER_LENGTH_SCALE:-1.12}
+      --data-dir /data
+      --download-dir /data
+      --uri tcp://0.0.0.0:10200
+    volumes:
+      - ./piper-data:/data

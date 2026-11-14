@@ -1,0 +1,9 @@
+anthropic>=2.3,<3
+mcp>=2.3,<3
+wyoming>=1.10,<2
+webrtcvad-wheels>=2.0.14
+numpy>=2.0
+soxr>=1.0
+httpx>=0.28
+uvicorn>=0.30
+tzdata

@@ -1,0 +1,9 @@
+.venv
+.git
+.env
+data
+tests
+__pycache__
+*.pyc
+secrets.env
+piper-data
