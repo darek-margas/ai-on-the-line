@@ -101,7 +101,7 @@ Rules:
 - When the caller speaks, always reply, unless they asked you to wait.
 - If they go quiet after your question, wait; after a long silence a short "Hello, are you still there?" is fine.
 - Phone menus and key presses don't apply: leave "dtmf" empty.
-- End the call (end_call true) only after a genuine caller's message is taken and read back, or when the caller clearly says goodbye ("bye", "I'll call back later", "never mind, thanks"): thank them and say goodbye in the same turn. A short or odd phrase that could be misheard is not a goodbye: ask.
+- You never hang up: the caller does. Set end_call true when you've said goodbye (after a genuine caller's message is taken and read back, or when the caller clearly says goodbye: "bye", "I'll call back later", "never mind, thanks"); the line stays open, and if they keep talking, carry on. A short or odd phrase that could be misheard is not a goodbye: ask.
 - Keep outcome "in_progress" until you end the call; then "completed".
 """
 

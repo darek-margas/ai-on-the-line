@@ -15,7 +15,8 @@ from test_call_flow import SILENCE, SPEECH, FakeDialog, FakeSpeech, make_config
 
 
 async def fake_pbx(port: int, call_id: str, received: list[int]):
-    """Asterisk handing over an answered call: a short "hello" after our greeting."""
+    """Asterisk handing over an answered call: a short "hello" after our greeting,
+    then the caller hangs up (the screener never does)."""
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     writer.write(ass.encode(ass.KIND_UUID, uuid.UUID(call_id).bytes))
 
@@ -33,7 +34,11 @@ async def fake_pbx(port: int, call_id: str, received: list[int]):
         writer.write(ass.encode(ass.KIND_AUDIO, frame))
         await writer.drain()
         await asyncio.sleep(0.02)
-    await listener
+    if not listener.done():
+        writer.write(ass.encode(ass.KIND_HANGUP))  # the caller hangs up
+        await writer.drain()
+        await asyncio.sleep(0.5)
+        listener.cancel()
     writer.close()
 
 
@@ -68,7 +73,8 @@ async def test_inbound_call_greets_first_then_converses(tmp_path):
     # We picked up, so we speak first; then their words, then the dialog's reply.
     assert [who for who, _ in saved["transcript"]] == ["agent", "callee", "agent"]
     assert saved["transcript"][0][1] == call.brief.opening_line
-    assert received[-1] == ass.KIND_HANGUP
+    # It said goodbye but left hanging up to the caller.
+    assert ass.KIND_HANGUP not in received
 
 
 @pytest.mark.asyncio
@@ -102,3 +108,20 @@ def test_screener_uses_the_inbound_prompt():
     assert captured["system"] != SYSTEM_PROMPT.format(owner="Alex", must_not="")
     assert "answering a live phone call" in captured["system"]
     assert "Caller: Hello" in captured["user"]
+
+
+@pytest.mark.asyncio
+async def test_failed_greeting_frees_the_inbound_slot(tmp_path):
+    """If Piper fails while the greeting is prepared, the next caller mustn't get 'busy'."""
+
+    class BrokenSpeech(FakeSpeech):
+        async def synthesize(self, text):
+            raise ConnectionError("piper down")
+
+    cfg = make_config(tmp_path)
+    manager = CallManager(cfg, Database(cfg.data_dir), BrokenSpeech(), FakeDialog(), None)
+    with pytest.raises(ConnectionError):
+        await manager.register_inbound(str(uuid.uuid4()), "0491570156", "", "screener")
+    manager.speech = FakeSpeech()  # Piper is back
+    call = await manager.register_inbound(str(uuid.uuid4()), "0491570157", "", "screener")
+    assert call.status == "ringing"

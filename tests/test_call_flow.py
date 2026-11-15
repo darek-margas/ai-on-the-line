@@ -639,3 +639,39 @@ async def test_no_reply_starts_while_they_talk(tmp_path):
         server.close()
 
     assert dialog.seen[0][-2:] == ["We found his company in the breach of...", "something, so I need to notify him."], dialog.seen
+
+
+def test_only_a_plain_farewell_ends_the_call():
+    from phone_agent.session import FAREWELL_ONLY
+
+    for bye in ("Thanks, bye!", "Okay, cheers.", "No worries, you too. Bye bye.", "Thank you, have a good day."):
+        assert FAREWELL_ONLY.match(bye), bye
+    for more in ("Thanks, but before you go, the price excludes delivery.", "Bye, oh wait, one more thing.", "Cheers, and it's ninety dollars."):
+        assert not FAREWELL_ONLY.match(more), more
+
+
+@pytest.mark.asyncio
+async def test_cancelled_queued_call_never_dials(tmp_path):
+    """hang_up on a call that hasn't dialled yet stops it for good."""
+
+    class SlowWarmUp(FakeDialog):
+        async def warm_up(self, brief=None):
+            await asyncio.sleep(1)
+
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    manager = CallManager(cfg, db, FakeSpeech(), SlowWarmUp(), None)
+    dialled = []
+
+    class CountingAri(FakeAri):
+        async def originate(self, *args, **kwargs):
+            dialled.append(args)
+            return "chan-1"
+
+    manager.ari = CountingAri(0)
+    brief = Brief(goal="g", callee="c", opening_line="Hi.", questions={"q": "q?"})
+    call = manager.start_call("0285550000", brief)
+    await asyncio.sleep(0.2)  # warming up, not dialled yet
+    assert await manager.hang_up(call.id)
+    await asyncio.wait_for(call.done.wait(), 10)
+    assert dialled == [] and call.outcome == "hung_up_by_owner"

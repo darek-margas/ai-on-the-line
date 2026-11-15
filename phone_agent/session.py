@@ -91,7 +91,14 @@ ACKNOWLEDGEMENT = re.compile(
 )
 
 
-GOODBYE = re.compile(r"\b(bye|goodbye|see ya|cheers|thanks|thank you|ta)\b", re.I)
+# Only a reply that is nothing but a farewell closes the call after our goodbye.
+# "Thanks, but before you go, the price excludes delivery" is not one.
+FAREWELL_ONLY = re.compile(
+    r"^(?:(?:ok(?:ay)?|alright|all right|yeah|yep|no worries|no problem|you too|and you|"
+    r"thanks|thank you|thanks a lot|cheers|ta|bye|bye bye|goodbye|see ya|see you|take care|"
+    r"have a (?:good|nice|great) (?:one|day|night|afternoon|evening|weekend)|you're welcome)[\s,.!]*)+$",
+    re.I,
+)
 TRAILING_WORDS = set(
     "and or but so because which that who when if then to the a an of for with after before "
     "on in at as like my your our their is was are were".split()
@@ -270,6 +277,7 @@ class CallSession:
         # Put on hold or being transferred: hold tones get no reply and no filler,
         # and the next person to speak gets our introduction at once.
         self._on_hold = False
+        self._farewell_said = False  # incoming calls: we said goodbye and wait for them to hang up
         self._streamed_at = 0.0  # when the current reply's first streamed sentence went out
         # They often pause mid-thought ("...back in two weeks." ... "so I can't help
         # you."). If they carry on before our reply has started, it's dropped and
@@ -392,6 +400,8 @@ class CallSession:
                     return
                 if self._on_hold and not self._introduced():
                     continue  # quiet on hold: wait for a person, don't talk into the queue
+                if self._farewell_said:
+                    continue  # we said goodbye on an incoming call: no nudges, they hang up
                 if silent_for < THINKING_SECONDS and self._we_spoke_last():
                     continue  # they're thinking (or gathering words): don't nudge yet
                 if self._we_spoke_last():
@@ -442,6 +452,7 @@ class CallSession:
                     continue
                 said = [h for h in heard if h]
                 joined = " ".join(said)
+                self._farewell_said = False  # they're still talking to us
                 if all(is_hold_sound(h) for h in said):
                     # Hold tones ("Beep."): nothing to answer.
                     self._on_hold = True
@@ -529,6 +540,12 @@ class CallSession:
                 await self._press(turn.dtmf)
             if turn.say and not turn.spoken:
                 await self._say(turn.say)
+            if turn.end_call and inbound:
+                # We never hang up on a caller: Purgatory wastes their time, not ours.
+                # After our goodbye we just stay quiet until they hang up.
+                log.info("call %s: said goodbye; waiting for the caller to hang up", call.id)
+                self._farewell_said = True
+                continue
             if turn.end_call:
                 if await self._still_talking_after_goodbye():
                     pending_event = (
@@ -551,7 +568,7 @@ class CallSession:
             self.utterances.put_nowait(HANGUP)
             return False
         text = await self._heard(item)
-        if not text or GOODBYE.search(text) or is_acknowledgement(text):
+        if not text or FAREWELL_ONLY.match(text.strip()) or is_acknowledgement(text):
             return False
         log.info("call %s: still talking after our goodbye: %r", self.call.id, text)
         return True

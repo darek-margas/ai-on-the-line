@@ -152,9 +152,18 @@ class CallManager:
         self.calls[call.id] = call
         call.changed()
         # The greeting plays the moment the audio connects: have it rendered now.
-        for line in [brief.opening_line] + FILLERS:
-            for sentence in split_sentences(line):
-                await self.speech.synthesize(sentence)
+        try:
+            for line in [brief.opening_line] + FILLERS:
+                for sentence in split_sentences(line):
+                    await self.speech.synthesize(sentence)
+        except Exception as exc:
+            # Give the slot back, or every later caller gets "busy" until a restart.
+            call.status = "failed"
+            call.error = repr(exc)
+            call.ended = time.time()
+            call.changed()
+            call.done.set()
+            raise
         task = asyncio.create_task(self._watch_inbound(call))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -196,6 +205,7 @@ class CallManager:
         call.set_outcome("hung_up_by_owner")
         if call.channel_id:
             await self.ari.hangup(call.channel_id)
+        # A call still queued or warming up is stopped by _run before it dials.
         return True
 
     async def _run(self, call: CallState) -> None:
@@ -211,6 +221,8 @@ class CallManager:
                 for line in opening_lines(call.brief.opening_line) + FILLERS:
                     for sentence in split_sentences(line):  # as _say will ask for them
                         await self.speech.synthesize(sentence)
+                if call.outcome == "hung_up_by_owner":
+                    return  # cancelled while queued or warming up: never dial
                 call.status = "dialing"
                 call.changed()
                 number = normalize_au_number(call.phone)
@@ -221,6 +233,9 @@ class CallManager:
                     self.cfg.audiosocket_advertise,
                     self.cfg.ring_timeout_seconds,
                 )
+                if call.outcome == "hung_up_by_owner":
+                    await self.ari.hangup(call.channel_id)  # cancelled while the dial request was in flight
+                    return
                 if await self._wait_connected(call):
                     await call.conversation_over.wait()
                 else:
