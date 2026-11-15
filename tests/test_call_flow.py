@@ -730,3 +730,37 @@ def test_downloaded_recording_carries_the_credit():
     # Without the spoken part only the metadata changes.
     with wave.open(io.BytesIO(with_credit(src.getvalue(), credit_line()))) as w:
         assert w.getnframes() == 8000
+
+
+def test_dialog_streams_say_from_ollama():
+    """Ollama's NDJSON stream goes through the same sentence-by-sentence path."""
+    import json as _json
+
+    import httpx
+
+    from phone_agent.dialog import Dialog
+
+    reply = '{"say":"Sure. Which day suits you?","dtmf":"","answers":[],"notes":"","end_call":false,"outcome":"in_progress"}'
+    sent = {}
+
+    def handler(request):
+        sent.update(_json.loads(request.content))
+        lines = [_json.dumps({"message": {"role": "assistant", "content": reply[i : i + 5]}, "done": False})
+                 for i in range(0, len(reply), 5)]
+        lines.append(_json.dumps({"message": {"role": "assistant", "content": ""}, "done": True}))
+        return httpx.Response(200, content="\n".join(lines).encode())
+
+    dialog = Dialog.__new__(Dialog)
+    dialog.owner, dialog.provider, dialog.model = "Alex", "ollama", "llama"
+    dialog.ollama_url, dialog.keep_alive = "http://ollama", -1
+    dialog._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    heard = []
+
+    async def on_sentence(sentence):
+        heard.append(sentence)
+
+    brief = Brief(goal="g", callee="c", opening_line="Hi.", questions={"q": "q?"})
+    turn = asyncio.run(dialog.next_turn(brief, [], {}, "event", on_sentence=on_sentence))
+    assert sent["stream"] is True and sent["think"] is False
+    assert heard == ["Sure.", "Which day suits you?"]
+    assert turn.spoken and turn.say == "Sure. Which day suits you?"

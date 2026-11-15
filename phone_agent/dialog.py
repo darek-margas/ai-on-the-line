@@ -339,7 +339,7 @@ class Dialog:
         on_sentence: Callable[[str], Awaitable[None]] | None = None,
     ) -> Turn:
         """With on_sentence, each finished sentence of "say" is handed over as
-        soon as it has streamed in (Claude only); the Turn then has spoken=True."""
+        soon as it has streamed in; the Turn then has spoken=True."""
         inbound = brief.direction == "inbound"
         system = (INBOUND_SYSTEM_PROMPT if inbound else SYSTEM_PROMPT).format(
             owner=self.owner, must_not="; ".join(brief.must_not)
@@ -358,7 +358,8 @@ class Dialog:
         )
         schema = turn_schema(list(brief.questions))
         spoken = False
-        if self.provider == "claude" and on_sentence is not None:
+        ask = self._ask_claude if self.provider == "claude" else self._ask_ollama
+        if on_sentence is not None:
             said = SayStream()
 
             async def on_text(chunk: str) -> None:
@@ -368,9 +369,9 @@ class Dialog:
                         spoken = True
                         await on_sentence(sentence)
 
-            raw = await self._ask_claude(system, user, schema, on_text)
+            raw = await ask(system, user, schema, on_text)
         else:
-            raw = await (self._ask_claude if self.provider == "claude" else self._ask_ollama)(system, user, schema)
+            raw = await ask(system, user, schema)
         data = json.loads(raw)
         return Turn(
             say=soften_laughs(data.get("say", "").strip()),
@@ -407,18 +408,38 @@ class Dialog:
             raise RuntimeError(f"model refused: {response.stop_details}")
         return next(b.text for b in response.content if b.type == "text")
 
-    async def _ask_ollama(self, system: str, user: str, schema: dict) -> str:
-        response = await self._http.post(
-            f"{self.ollama_url}/api/chat",
-            json={
-                "model": self.model,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                "format": schema,
-                "stream": False,
-                "think": False,  # reasoning adds latency we can't afford mid-call
-                "keep_alive": self.keep_alive,
-                "options": {"temperature": 0.2},
-            },
-        )
-        response.raise_for_status()
-        return response.json()["message"]["content"]
+    async def _ask_ollama(self, system: str, user: str, schema: dict, on_text=None) -> str:
+        """Ollama's chat API streams newline-delimited JSON, one chunk of the
+        reply per line. With a schema in "format", properties come in schema
+        order, so "say" streams first, as with Claude."""
+        request = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "format": schema,
+            "stream": on_text is not None,
+            "think": False,  # reasoning adds latency we can't afford mid-call
+            "keep_alive": self.keep_alive,
+            "options": {"temperature": 0.2},
+        }
+        if on_text is None:
+            response = await self._http.post(f"{self.ollama_url}/api/chat", json=request)
+            response.raise_for_status()
+            return response.json()["message"]["content"]
+        parts = []
+        async with self._http.stream("POST", f"{self.ollama_url}/api/chat", json=request) as response:
+            if response.is_error:
+                await response.aread()
+                response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.strip():
+                    continue
+                chunk = json.loads(line)
+                if "error" in chunk:
+                    raise RuntimeError(f"Ollama: {chunk['error']}")
+                text = chunk.get("message", {}).get("content", "")
+                if text:
+                    parts.append(text)
+                    await on_text(text)
+                if chunk.get("done"):
+                    break
+        return "".join(parts)
