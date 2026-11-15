@@ -449,8 +449,10 @@ audio {{ width: 100%; }}
 
 async def main() -> None:
     # LOG_LEVEL=DEBUG adds what was said on each call to the log; INFO keeps only timings.
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # It applies to our own messages only: at DEBUG the Anthropic client would log
+    # whole prompts (transcripts included) and the HTTP libraries every request.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("phone_agent").setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
     cfg = Config.from_env()
     if not cfg.api_token and os.environ.get("ALLOW_NO_AUTH", "").lower() != "true":
         # Without a token, anyone who can reach the port can phone people on your line.
