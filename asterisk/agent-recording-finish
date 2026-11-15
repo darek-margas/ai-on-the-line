@@ -1,0 +1,31 @@
+#!/bin/sh
+# Runs when an agent call's recording ends (MixMonitor's post-command).
+#   agent-recording-finish <call id> <day folder> <FreePBX file name>
+#
+# MixMonitor writes the mixed call plus each side on its own (<id>-rx.wav,
+# <id>-tx.wav). On a phone call one side is often much quieter than the
+# other, so each side is compressed and normalised before the two are
+# mixed again into <id>.wav. The unlevelled mix is kept as <id>-raw.wav.
+# Then the result is linked into FreePBX's dated folder, so the call shows
+# a play button in Reports > CDR.
+set -u
+id="$1"; dayfolder="$2"; name="$3"
+d=/var/spool/asterisk/monitor/phone-agent
+cd "$d" || exit 0
+
+level() {
+    # Leave headroom (Piper and some lines peak at full scale), cut rumble, even
+    # out loud and quiet speech, then bring the peak to -3 dB.
+    # The expander part (below -60 dB) keeps line hiss in the pauses quiet.
+    sox "$1" "$2" gain -3 highpass 120 compand 0.02,0.25 6:-70,-60,-20 -8 -90 0.1 gain -n -3
+}
+
+if [ -s "$id-rx.wav" ] && [ -s "$id-tx.wav" ] \
+    && level "$id-rx.wav" "$id-rx.lvl.wav" && level "$id-tx.wav" "$id-tx.lvl.wav" \
+    && sox -m "$id-rx.lvl.wav" "$id-tx.lvl.wav" "$id.mix.wav" gain -n -1; then
+    mv -f "$id.wav" "$id-raw.wav" && mv -f "$id.mix.wav" "$id.wav"
+fi
+rm -f "$id-rx.lvl.wav" "$id-tx.lvl.wav" "$id.mix.wav"
+chown asterisk:asterisk "$d/$id"*.wav 2>/dev/null
+
+mkdir -p "$dayfolder" && ln -sf "$d/$id.wav" "$dayfolder/$name"

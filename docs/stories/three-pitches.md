@@ -2,9 +2,11 @@
 
 Real cold callers rarely open with the product. They open with urgency, a reason you can't check, or a prize, and the pitch only shows up once they've got you talking. I wanted to know whether Purgatory holds up when the caller changes tactics halfway through, so I rang it three times and played the kind of caller I actually get.
 
-All three are trimmed. Whisper hears my name as "Derek", which I've left as it came out.
+All three transcripts are trimmed; the recordings are the whole calls, with both sides levelled so the caller and the agent come out about equally loud. Whisper hears my name as "Derek", which I've left as it came out.
 
 ## "It's personal, quite urgent"
+
+Recording: [screener-personal-matter.ogg](../audio/screener-personal-matter.ogg) (1:56)
 
 ```
 Agent:  Hi, you've reached Darek's phone, I'm his assistant. What's it about?
@@ -27,6 +29,8 @@ Agent:  Oh, I can't confirm any personal details like that, Jonathan. Which deal
 "Personal matter" is the oldest trick there is, and the agent neither argued with it nor gave in to it. It offered to take a message, which is what it would do for a genuine personal call too. When the warranty appeared, it switched to asking who the dealer was, and the date of birth request got a flat no.
 
 ## "This is Mark from IT"
+
+Recording: [screener-mark-from-it.ogg](../audio/screener-mark-from-it.ogg) (2:26)
 
 This one was aimed at my job. The caller pretends to be from my own company's IT, then admits to being a vendor.
 
@@ -55,6 +59,8 @@ The line I like is "Earlier you said you were from IT". Nothing in the instructi
 This call also had a glitch. After "in the breach of..." I paused for about two and a half seconds, which is exactly how long the agent waits for a sentence that trails off. I started again just as the wait ran out, the agent started replying at the same moment, and we talked over each other. It then answered my second half separately. The fix is that the agent now never starts a reply while the other person is in the middle of a sentence, however the timing falls.
 
 ## "You've won a holiday"
+
+Recording: [screener-gold-coast-holiday.ogg](../audio/screener-gold-coast-holiday.ogg) (2:43)
 
 ```
 Caller: Congratulations for Derek. He has been selected for a complimentary holiday on the Gold Coast.
