@@ -105,7 +105,7 @@ The docs, stories, screenshots and recordings are under [CC BY-SA 4.0](docs/LICE
 
 The agent's default voice is Jenny (Dioco), a Piper voice trained on the [Jenny TTS dataset](https://github.com/dioco-group/jenny-tts-dataset). Its terms ask software that uses it to credit the voice, which the footer does; a [copy of those terms](docs/third-party/jenny-tts-dataset-README.md) is kept here.
 
-If you publish recordings made with it, a "Made with AI on the Line" line with a link would be appreciated. It's a request, not a condition.
+If you publish recordings made with it, a "Made with AI on the Line" line with a link would be appreciated. It's a request, not a condition, but it's the default: a recording downloaded from the call page has the credit in its metadata and a short spoken "Recorded with AI on the Line." at the end (`EXPORT_SPOKEN_CREDIT=false` turns that off), and the page shows the line to paste under a post.
 
 ## Status
 

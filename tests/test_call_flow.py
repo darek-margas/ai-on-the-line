@@ -686,3 +686,24 @@ def test_pages_carry_the_credit_and_source_link():
     html = server.page("Calls", "<p>x</p>")
     assert "AI on the Line</a> by Darek Margas" in html and "source</a> (AGPL-3.0)" in html
     assert "Jenny (Dioco)" in html
+
+
+def test_downloaded_recording_carries_the_credit():
+    import io
+    import wave
+
+    from phone_agent.credit import credit_line, with_credit
+
+    src = io.BytesIO()
+    with wave.open(src, "wb") as w:  # one second of 8 kHz phone audio, as MixMonitor writes it
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000); w.writeframes(b"\x10\x00" * 8000)
+    outro = b"\x20\x00" * 8000  # half a second of "speech" at 16 kHz
+    out = with_credit(src.getvalue(), credit_line("Jenny (Dioco)"), outro, 16000)
+    with wave.open(io.BytesIO(out)) as w:
+        assert w.getframerate() == 8000
+        assert w.getnframes() == 8000 + int(8000 * 0.6) + 4000  # the call, a pause, the spoken credit
+    assert b"Made with AI on the Line (https://github.com/darek-margas/ai-on-the-line). Voice: Jenny (Dioco)" in out
+    assert b"ICMT" in out and b"ISFT" in out
+    # Without the spoken part only the metadata changes.
+    with wave.open(io.BytesIO(with_credit(src.getvalue(), credit_line()))) as w:
+        assert w.getnframes() == 8000

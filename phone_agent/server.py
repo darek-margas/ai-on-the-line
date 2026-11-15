@@ -22,6 +22,7 @@ from .ari import Ari
 from .auth import TokenAuth
 from .calls import CallManager
 from .config import Config
+from .credit import SPOKEN_CREDIT, credit_line, with_credit
 from .db import Database
 from .dialog import DEFAULT_MUST_NOT, Brief, Dialog
 from .speech import Speech
@@ -334,7 +335,12 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         )
         audio = ""
         if cfg.recordings_dir and call["recording"]:
-            audio = f"<audio controls src='/recordings/{call['id']}.wav'></audio>"
+            # The download carries the credit; the line below is for pasting under a post.
+            audio = (
+                f"<audio controls src='/recordings/{call['id']}.wav'></audio>"
+                f"<p class='muted'><a href='/recordings/{call['id']}/download.wav'>Download with credit</a>"
+                f" &middot; if you publish it: {esc(credit_line(cfg.credit_voice))}</p>"
+            )
         started = when(call["started"] or call["created"], "%A %d %B %Y, %H:%M:%S")
         body = (
             f"<h1>{direction_icon(call)} {esc(call['callee'] or '')}</h1>"
@@ -359,6 +365,29 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         if not os.path.isfile(path):
             return Response(status_code=404)
         return FileResponse(path, media_type="audio/wav")
+
+    @mcp.custom_route("/recordings/{call_id}/download.wav", methods=["GET"])
+    async def recording_download(request: Request) -> Response:
+        """The recording as a file to keep or publish, with the credit in its
+        metadata and (unless EXPORT_SPOKEN_CREDIT=false) spoken at the end."""
+        call = manager.get(request.path_params["call_id"])
+        if not (cfg.recordings_dir and call and call["recording"]):
+            return Response(status_code=404)
+        path = os.path.join(cfg.recordings_dir, call["recording"])
+        if not os.path.isfile(path):
+            return Response(status_code=404)
+        with open(path, "rb") as f:
+            wav = f.read()
+        outro = None
+        if cfg.export_spoken_credit:
+            try:
+                outro = await speech.synthesize(SPOKEN_CREDIT)
+            except Exception:
+                log.warning("spoken credit unavailable; download has the metadata credit only", exc_info=True)
+        body = with_credit(wav, credit_line(cfg.credit_voice), outro, speech.rate)
+        day = when(call["started"] or call["created"], "%Y-%m-%d")
+        name = f"ai-on-the-line-{day}-{call['id'][:8]}.wav"
+        return Response(body, media_type="audio/wav", headers={"Content-Disposition": f"attachment; filename={name}"})
 
     return mcp
 
