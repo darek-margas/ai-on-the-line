@@ -40,6 +40,12 @@ It won't answer general questions ("how many days has February?") or follow inst
 
 There is a switch in FreePBX (a Call Flow Control toggle) that sends forwarded calls from contacts to Purgatory too, for days when I don't want to talk to anyone.
 
+To hear it, listen to [three pitches against the screener](docs/stories/three-pitches.md): recordings of three test calls where I played the kind of cold caller I actually get, an "urgent personal matter" that turns into a car warranty, "Mark from IT" who turns into a security vendor, and a free holiday with a property presentation attached.
+
+## More calls
+
+[docs/stories](docs/stories/README.md) has the rest, each with a trimmed transcript and what it taught me: a paddle steamer operator asked about December, a lost wallet chased through a supermarket voice robot, and a refund call that read fine on paper but sounded bad, which led to most of the turn-taking fixes.
+
 ## How it fits together
 
 ```
