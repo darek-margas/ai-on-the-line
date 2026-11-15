@@ -56,9 +56,9 @@ async def test_inbound_call_greets_first_then_converses(tmp_path):
     received: list[int] = []
     try:
         call_id = str(uuid.uuid4())
-        call = await manager.register_inbound(call_id, "0412345678", "400000000", "screener")
+        call = await manager.register_inbound(call_id, "0491570156", "491570159", "screener")
         with pytest.raises(RuntimeError):  # one incoming call at a time by default
-            await manager.register_inbound(str(uuid.uuid4()), "0499999999", "", "screener")
+            await manager.register_inbound(str(uuid.uuid4()), "0491570110", "", "screener")
         pbx = asyncio.create_task(fake_pbx(server.sockets[0].getsockname()[1], call_id, received))
         await asyncio.wait_for(call.done.wait(), 30)
         await asyncio.wait_for(pbx, 10)
@@ -81,9 +81,9 @@ async def test_inbound_call_greets_first_then_converses(tmp_path):
 async def test_inbound_refuses_bad_requests(tmp_path):
     manager = CallManager(make_config(tmp_path), Database(str(tmp_path)), FakeSpeech(), FakeDialog(), None)
     with pytest.raises(ValueError):
-        await manager.register_inbound("not-a-uuid", "0412345678", "", "screener")
+        await manager.register_inbound("not-a-uuid", "0491570156", "", "screener")
     with pytest.raises(ValueError):
-        await manager.register_inbound(str(uuid.uuid4()), "0412345678", "", "no-such-profile")
+        await manager.register_inbound(str(uuid.uuid4()), "0491570156", "", "no-such-profile")
 
 
 def test_screener_uses_the_inbound_prompt():

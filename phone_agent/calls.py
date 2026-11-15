@@ -25,7 +25,7 @@ INBOUND_CONNECT_SECONDS = 30  # registered incoming call whose audio never arriv
 
 
 def normalize_au_number(phone: str) -> str:
-    """'+61 8 8672 5555' -> '0886725555'. Leaves other formats, including
+    """'+61 8 5550 1234' -> '0855501234'. Leaves other formats, including
     internal extensions like '100', as bare digits."""
     digits = re.sub(r"[^\d+]", "", phone)
     if digits.startswith("+61"):

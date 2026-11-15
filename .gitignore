@@ -6,3 +6,11 @@ __pycache__/
 data/
 secrets.env
 piper-data/
+
+# Contact imports for Contact Manager (tools/contacts_to_freepbx.py): personal data
+*.vcf
+contacts*.json
+blocked*.txt
+# Call recordings and exports
+*.wav
+!docs/**/*.wav

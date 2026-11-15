@@ -5,7 +5,7 @@
 //     python tools/contacts_to_freepbx.py contacts.vcf | ssh root@pbx php /root/load_contacts.php imported
 //
 // Numbers are stored without a country (locale), so FreePBX keeps them as the plain
-// digits Internode sends as caller ID (0412345678) and the caller lookup matches exactly.
+// digits Internode sends as caller ID (0491570156) and the caller lookup matches exactly.
 // Contacts can be edited in Admin > Contact Manager afterwards; re-running replaces them.
 
 include '/etc/freepbx.conf';

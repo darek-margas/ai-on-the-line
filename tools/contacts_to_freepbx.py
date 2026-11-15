@@ -3,7 +3,7 @@ Export) into contacts for FreePBX's Contact Manager, which the PBX checks before
 screening a forwarded call.
 
 Prints JSON: one entry per contact with displayname, fname, lname, company, title and
-numbers (national form, as Internode presents caller ID: 0412345678, 0295551234;
+numbers (national form, as Internode presents caller ID: 0491570156, 0255501234;
 type cell / work / home / other; faxes left out). An optional second file lists
 blocked contacts, one name or number per line (as iPhone shows them under Settings >
 Apps > Phone > Blocked Contacts): they're left out, so their calls still go to the
@@ -33,7 +33,7 @@ def unfold(text: str) -> list[str]:
 
 
 def national(number: str) -> str | None:
-    """'+61 412 345 678' -> '0412345678'; '9555 1234' -> '0295551234' (Sydney).
+    """'+61 491 570 156' -> '0491570156'; '5550 1234' -> '0255501234' (Sydney).
     None for numbers that can't arrive as an Australian caller ID."""
     digits = re.sub(r"[^\d+]", "", number)
     if digits.startswith("+61"):

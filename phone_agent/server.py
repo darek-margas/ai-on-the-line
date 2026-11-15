@@ -111,7 +111,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         """Start a phone call. Returns a call_id immediately; poll get_call for the result.
 
         Args:
-            phone: Number to dial, e.g. "+61 8 8672 5555" or "08 8672 5555".
+            phone: Number to dial, e.g. "+61 8 5550 1234" or "08 5550 1234".
             callee: Who you're calling, e.g. "Riverside Motel reception".
             goal: One or two sentences: what this call should achieve.
             opening_line: First thing the agent says after they answer. Must introduce it as the owner's assistant (e.g. "Hi, I'm Alex's assistant") and say why it's calling.
@@ -235,7 +235,8 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         except (ValueError, RuntimeError) as exc:
             log.warning("inbound call refused: %s", exc)
             return Response(str(exc), status_code=409, media_type="text/plain")
-        log.info("inbound call %s from %r (diverted from %r)", call.id, call.phone, get("diverted"))
+        # Only the last digits: caller numbers don't belong in routine logs.
+        log.info("inbound call %s from ...%s%s", call.id, call.phone[-3:], " (forwarded)" if get("diverted") else "")
         return Response("ok", media_type="text/plain")
 
     tz = ZoneInfo(cfg.timezone)
@@ -447,7 +448,9 @@ audio {{ width: 100%; }}
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # LOG_LEVEL=DEBUG adds what was said on each call to the log; INFO keeps only timings.
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cfg = Config.from_env()
     if not cfg.api_token and os.environ.get("ALLOW_NO_AUTH", "").lower() != "true":
         # Without a token, anyone who can reach the port can phone people on your line.

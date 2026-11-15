@@ -570,7 +570,8 @@ class CallSession:
         text = await self._heard(item)
         if not text or FAREWELL_ONLY.match(text.strip()) or is_acknowledgement(text):
             return False
-        log.info("call %s: still talking after our goodbye: %r", self.call.id, text)
+        log.info("call %s: still talking after our goodbye", self.call.id)
+        log.debug("call %s: after our goodbye they said %r", self.call.id, text)
         return True
 
     async def _press(self, digits: str) -> None:
@@ -579,7 +580,9 @@ class CallSession:
         if self.send_dtmf is not None:
             try:
                 await self.send_dtmf(digits)
-                log.info("call %s: pressed %r (DTMF via AMI)", self.call.id, digits)
+                # Menu choices are harmless, but a brief could also have it key in a reference.
+                log.info("call %s: pressed %d key(s) (DTMF via AMI)", self.call.id, len(digits))
+                log.debug("call %s: pressed %r", self.call.id, digits)
                 return
             except Exception:
                 log.exception("call %s: AMI DTMF failed, falling back to tones", self.call.id)
@@ -638,7 +641,7 @@ class CallSession:
                     return None
         else:
             call.error = "dialog LLM failed twice"
-            await self._say(f"I'm sorry, I'm having technical trouble. {call.owner} will call you back. Goodbye.")
+            await self._say(f"I'm sorry, I'm having technical trouble, so I'll have to go. I'll let {call.owner} know we spoke. Goodbye.")
             call.set_outcome("technical_failure")
             return None
         call.answers.update(turn.answers)
@@ -745,13 +748,19 @@ class CallSession:
         if len(pcm) >= self.frame_bytes * MIN_UTTERANCE_MS // ass.FRAME_MS:
             t0 = time.monotonic()
             text = await self.speech.transcribe(pcm)
-            log.info("call %s: STT %.0f ms: %r", self.call.id, (time.monotonic() - t0) * 1000, text)
+            # Timing at INFO; what was said only at DEBUG (LOG_LEVEL=DEBUG), so routine
+            # logs don't collect names, numbers or booking references. The call
+            # database has the transcript anyway.
+            log.info("call %s: STT %.0f ms (%d chars)", self.call.id, (time.monotonic() - t0) * 1000, len(text))
+            log.debug("call %s: heard %r", self.call.id, text)
         if text and overlapped_line and is_echo(text, overlapped_line):
-            log.info("call %s: echo of our own line, ignored: %r", self.call.id, text)
+            log.info("call %s: echo of our own line, ignored", self.call.id)
+            log.debug("call %s: echo was %r", self.call.id, text)
             text = ""
         elif text and overlapped_line and is_acknowledgement(text):
             # "Thank you" / "okay" said over us is a reaction, not an answer.
-            log.info("call %s: reaction while we spoke, not an answer: %r", self.call.id, text)
+            log.info("call %s: reaction while we spoke, not an answer", self.call.id)
+            log.debug("call %s: reaction was %r", self.call.id, text)
             text = ""
         if self._paused_at is not None:
             if text:
@@ -774,7 +783,8 @@ class CallSession:
         for i, sentence in enumerate(split_sentences(text)):
             t0 = time.monotonic()
             pcm = await self.speech.synthesize(sentence)
-            log.info("call %s: TTS %.0f ms: %r", self.call.id, (time.monotonic() - t0) * 1000, sentence)
+            log.info("call %s: TTS %.0f ms (%d chars)", self.call.id, (time.monotonic() - t0) * 1000, len(sentence))
+            log.debug("call %s: saying %r", self.call.id, sentence)
             if i == 0:
                 self._play(pcm)
             else:
@@ -789,7 +799,8 @@ class CallSession:
             self._streamed_at = time.monotonic()  # no filler from now on
         t0 = time.monotonic()
         pcm = await self.speech.synthesize(sentence)
-        log.info("call %s: TTS %.0f ms: %r", self.call.id, (time.monotonic() - t0) * 1000, sentence)
+        log.info("call %s: TTS %.0f ms (%d chars)", self.call.id, (time.monotonic() - t0) * 1000, len(sentence))
+        log.debug("call %s: saying %r", self.call.id, sentence)
         if first:
             self.call.add_transcript("agent", sentence)
             self._speaking_line = sentence

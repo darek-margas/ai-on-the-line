@@ -116,7 +116,7 @@ async def test_call_completes(tmp_path):
     try:
         brief = Brief(goal="Ask price", callee="Hotel", opening_line="Hi, automated assistant here.",
                       questions={"price": "price per night"})
-        call = manager.start_call("+61 8 8672 5555", brief)
+        call = manager.start_call("+61 8 5550 1234", brief)
         await asyncio.wait_for(call.done.wait(), 30)
         await asyncio.wait_for(ari.task, 10)  # fake Asterisk has seen the hangup
     finally:
@@ -138,16 +138,16 @@ async def test_call_completes(tmp_path):
 
 
 def test_normalize_number():
-    assert normalize_au_number("+61 8 8672 5555") == "0886725555"
-    assert normalize_au_number("(08) 8672 5555") == "0886725555"
-    assert normalize_au_number("61886725555") == "0886725555"
+    assert normalize_au_number("+61 8 5550 1234") == "0855501234"
+    assert normalize_au_number("(08) 5550 1234") == "0855501234"
+    assert normalize_au_number("61855501234") == "0855501234"
     assert normalize_au_number("100") == "100"  # internal extension
-    assert normalize_au_number("0412 345 678") == "0412345678"
-    assert normalize_au_number("9555 1234") == "95551234"  # Sydney without 02
+    assert normalize_au_number("0491 570 156") == "0491570156"
+    assert normalize_au_number("5550 1234") == "55501234"  # Sydney without 02
     assert normalize_au_number("1800 123 456") == "1800123456"
     assert normalize_au_number("101") == "101" and normalize_au_number("7999") == "7999"
     for refused in ("call me", "13 13 13", "131313", "1300 123 456", "000", "112", "106", "1900 123 456",
-                    "+48 123 456 789", "8672 555"):
+                    "+48 123 456 789", "5550 123"):
         with pytest.raises(ValueError):
             normalize_au_number(refused)
 
@@ -282,22 +282,22 @@ def test_contacts_from_vcard():
     spec.loader.exec_module(c2f)
     vcf = (
         "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Smith;Anna;;;\r\nFN:Anna Smith\r\n"
-        "item1.TEL;type=CELL;type=pref:+61 412 345 678\r\nTEL;type=HOME:(02) 9555 1234\r\n"
-        "TEL;type=WORK;type=FAX:02 9555 9999\r\nEND:VCARD\r\n"
-        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nORG:Joe\\, Plumbing;\r\nTEL:9555 5466\r\nTEL:+48 12 345 67 89\r\nEND:VCARD\r\n"
-        "BEGIN:VCARD\r\nFN:Long\r\n Name\r\nTEL;type=WORK:0011 61 423 000 111\r\nTEL:0412 345 678\r\nEND:VCARD\r\n"
+        "item1.TEL;type=CELL;type=pref:+61 491 570 156\r\nTEL;type=HOME:(02) 5550 1234\r\n"
+        "TEL;type=WORK;type=FAX:02 5550 9999\r\nEND:VCARD\r\n"
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nORG:Joe\\, Plumbing;\r\nTEL:5550 5466\r\nTEL:+48 12 345 67 89\r\nEND:VCARD\r\n"
+        "BEGIN:VCARD\r\nFN:Long\r\n Name\r\nTEL;type=WORK:0011 61 491 570 158\r\nTEL:0491 570 156\r\nEND:VCARD\r\n"
     )
     entries = c2f.contacts(vcf)
     assert entries == [
         {"displayname": "Anna Smith", "fname": "Anna", "lname": "Smith", "company": "", "title": "",
-         "numbers": [{"number": "0412345678", "type": "cell"}, {"number": "0295551234", "type": "home"}]},  # no fax
+         "numbers": [{"number": "0491570156", "type": "cell"}, {"number": "0255501234", "type": "home"}]},  # no fax
         {"displayname": "Joe, Plumbing", "fname": "", "lname": "", "company": "Joe, Plumbing", "title": "",
-         "numbers": [{"number": "0295555466", "type": "other"}]},  # Sydney local; Polish number left out
+         "numbers": [{"number": "0255505466", "type": "other"}]},  # Sydney local; Polish number left out
         {"displayname": "LongName", "fname": "", "lname": "", "company": "", "title": "",
-         "numbers": [{"number": "0423000111", "type": "work"}]},  # folded FN; 0011 61; Anna's number not repeated
+         "numbers": [{"number": "0491570158", "type": "work"}]},  # folded FN; 0011 61; Anna's number not repeated
     ]
     # Blocked contacts (by name, or by any of their numbers in any format) are left out.
-    assert [e["displayname"] for e in c2f.contacts(vcf, ["anna smith", "+61 2 9555 5466"])] == ["LongName"]
+    assert [e["displayname"] for e in c2f.contacts(vcf, ["anna smith", "+61 2 5550 5466"])] == ["LongName"]
 
 
 def test_laughs_become_hey():
@@ -411,7 +411,7 @@ async def test_hold_queue_then_person(tmp_path):
     try:
         brief = Brief(goal="Lost wallet", callee="Store", opening_line="Hi, I'm Alex's assistant. Has a pink wallet been handed in?",
                       questions={"wallet_found": "was it handed in"})
-        call = manager.start_call("0285550000", brief)
+        call = manager.start_call("0255500000", brief)
         await asyncio.wait_for(call.done.wait(), 60)
     finally:
         vad.webrtcvad.Vad.is_speech = orig
@@ -501,7 +501,7 @@ async def test_streamed_reply_is_spoken_once(tmp_path):
     try:
         brief = Brief(goal="Ask price", callee="Hotel", opening_line="Hi, automated assistant here.",
                       questions={"price": "price per night"})
-        call = manager.start_call("+61 8 8672 5555", brief)
+        call = manager.start_call("+61 8 5550 1234", brief)
         await asyncio.wait_for(call.done.wait(), 30)
     finally:
         vad.webrtcvad.Vad.is_speech = orig
@@ -564,7 +564,7 @@ async def test_carrying_on_replaces_the_pending_reply(tmp_path):
     try:
         brief = Brief(goal="Refund", callee="Motel", opening_line="Hi, it's about a cancelled booking. Got a moment?",
                       questions={"refund": "refund status"})
-        call = manager.start_call("0285550000", brief)
+        call = manager.start_call("0255500000", brief)
         await asyncio.wait_for(call.done.wait(), 60)
     finally:
         vad.webrtcvad.Vad.is_speech = orig
@@ -601,7 +601,7 @@ async def test_long_answer_is_not_silence(tmp_path, monkeypatch):
     try:
         brief = Brief(goal="Pitch", callee="Caller", opening_line="Hi, it's about your offer. What do you sell?",
                       questions={"product": "what they sell"})
-        call = manager.start_call("0285550000", brief)
+        call = manager.start_call("0255500000", brief)
         await asyncio.wait_for(call.done.wait(), 60)
     finally:
         vad.webrtcvad.Vad.is_speech = orig
@@ -632,7 +632,7 @@ async def test_no_reply_starts_while_they_talk(tmp_path):
     vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
     try:
         brief = Brief(goal="Screen", callee="Caller", opening_line="Hi, what's it about?", questions={"reason": "why"})
-        call = manager.start_call("0285550000", brief)
+        call = manager.start_call("0255500000", brief)
         await asyncio.wait_for(call.done.wait(), 60)
     finally:
         vad.webrtcvad.Vad.is_speech = orig
@@ -670,7 +670,7 @@ async def test_cancelled_queued_call_never_dials(tmp_path):
 
     manager.ari = CountingAri(0)
     brief = Brief(goal="g", callee="c", opening_line="Hi.", questions={"q": "q?"})
-    call = manager.start_call("0285550000", brief)
+    call = manager.start_call("0255500000", brief)
     await asyncio.sleep(0.2)  # warming up, not dialled yet
     assert await manager.hang_up(call.id)
     await asyncio.wait_for(call.done.wait(), 10)
