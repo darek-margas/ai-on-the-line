@@ -379,6 +379,12 @@ class CallSession:
                     continue
                 if self._frames:
                     continue  # we're still talking
+                if self.segmenter.in_speech:
+                    # They're mid-sentence: a long answer only becomes an utterance when
+                    # it ends, so this wasn't silence. (A 20 s answer used to get "Are
+                    # you still there?" just before it finished.)
+                    silent_for = 0
+                    continue
                 silent_for += LISTEN_SECONDS
                 if silent_for >= self.hold_timeout_seconds:
                     call.set_outcome("no_response")

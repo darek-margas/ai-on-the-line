@@ -332,6 +332,8 @@ class ScriptedSpeech(FakeSpeech):
         self.lines = list(lines)
 
     async def transcribe(self, pcm: bytes) -> str:
+        if not any(pcm):
+            return ""  # the warm-up before dialling sends silence: not a script line
         return self.lines.pop(0) if self.lines else ""
 
 
@@ -573,3 +575,37 @@ async def test_carrying_on_replaces_the_pending_reply(tmp_path):
     assert agent == [brief.opening_line, "Okay, thanks anyway. Bye!"], saved["transcript"]
     assert dialog.calls == 2  # the first reply was dropped before any of it played
     assert dialog.seen[-1][-2:] == ["The manager is away.", "So I can't help you."]
+
+
+@pytest.mark.asyncio
+async def test_long_answer_is_not_silence(tmp_path, monkeypatch):
+    """A long answer only becomes an utterance when it ends. Before that it
+    mustn't count as silence: no "are you still there?" while they talk."""
+    import phone_agent.session as session
+
+    monkeypatch.setattr(session, "LISTEN_SECONDS", 1)
+    monkeypatch.setattr(session, "THINKING_SECONDS", 2)
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    speech = ScriptedSpeech(["Hello?", "Well, it depends on his budget, I sell everything from pots to cars."])
+    dialog = ScriptedDialog([Turn(say="Got it, thanks. Bye!", end_call=True, outcome="completed")])
+    manager = CallManager(cfg, db, speech, dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    # A greeting, then a 4 s answer: twice the (shortened) thinking time.
+    ari = BurstAri(server.sockets[0].getsockname()[1], [25, 200], gaps=[75, 300])
+    manager.ari = ari
+
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    try:
+        brief = Brief(goal="Pitch", callee="Caller", opening_line="Hi, it's about your offer. What do you sell?",
+                      questions={"product": "what they sell"})
+        call = manager.start_call("0285550000", brief)
+        await asyncio.wait_for(call.done.wait(), 60)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+
+    assert not any("No speech from the callee" in e for e in dialog.events), dialog.events
+    assert dialog.calls == 1 and "just spoke" in dialog.events[0]
