@@ -279,6 +279,18 @@ def _rms(x: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(x.astype(np.float64))))) if len(x) else 0.0
 
 
+async def _retry(fn, arg, attempts: int = 3):
+    """Whisper or Piper sometimes drops a single connection (seen right after a
+    restart); one hiccup shouldn't lose a whole sample."""
+    for i in range(attempts):
+        try:
+            return await fn(arg)
+        except (ConnectionError, OSError):
+            if i == attempts - 1:
+                raise
+            await asyncio.sleep(0.5 * (i + 1))
+
+
 async def revoice_track(pcm: np.ndarray, rate: int, speech, names: list[str]) -> tuple[np.ndarray, list[dict]]:
     """The same track with every stretch of speech replaced by the TTS voice
     saying the redacted transcript of it, fitted to the same start, length and
@@ -291,11 +303,11 @@ async def revoice_track(pcm: np.ndarray, rate: int, speech, names: list[str]) ->
         a, b = int(start * rate), min(int(end * rate), len(pcm))
         piece = pcm[a:b]
         level = _rms(piece)
-        text = await speech.transcribe(piece.tobytes())
+        text = await _retry(speech.transcribe, piece.tobytes())
         if text:
             said = redact(text, names)
             lines.append({"t": round(start, 1), "text": said})
-            voice = _trim(np.frombuffer(await speech.synthesize(speakable(said)), dtype=np.int16))
+            voice = _trim(np.frombuffer(await _retry(speech.synthesize, speakable(said)), dtype=np.int16))
             fitted = stretch(voice.astype(np.float32), b - a, rate)
         else:
             fitted = rng.normal(0, 1, b - a).astype(np.float32)

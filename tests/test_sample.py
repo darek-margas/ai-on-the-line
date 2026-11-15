@@ -157,3 +157,21 @@ def test_revoiced_call_sample(tmp_path):
     original = np.frombuffer(wave.open(str(rec / "abc-rx.wav")).readframes(10**6), dtype=np.int16)
     revoiced = np.frombuffer(wave.open(io.BytesIO(z.read("other.wav"))).readframes(10**6), dtype=np.int16)
     assert len(revoiced) == len(original) and not np.array_equal(revoiced, original)
+
+
+def test_revoice_retries_a_dropped_connection():
+    from phone_agent.sample import revoice_track
+
+    class Flaky(FakeVoice):
+        failed = False
+
+        async def synthesize(self, text):
+            if not self.failed:
+                self.failed = True
+                raise ConnectionError("Wyoming TTS closed the connection")
+            return await super().synthesize(text)
+
+    pcm = np.concatenate([np.zeros(8000), tone(1), np.zeros(8000)]).astype(np.int16)
+    speech = Flaky(["Hello."])
+    out, lines = asyncio.run(revoice_track(pcm, 8000, speech, []))
+    assert speech.failed and lines == [{"t": 1.0, "text": "Hello."}] and np.abs(out).max() > 0
