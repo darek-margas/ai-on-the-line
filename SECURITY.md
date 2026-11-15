@@ -21,11 +21,14 @@ The model you talk to (Claude Code or Claude Desktop) is the one with tools: `pl
 
 What's in place against that:
 
-- `get_call` and `list_calls` mark every call's answers, notes and transcript as untrusted (an `untrusted` field in each result), and the MCP server's instructions tell the model to report such requests to you rather than act on them.
+- `get_call` and `list_calls` mark every call's answers, notes and transcript as untrusted (an `untrusted` field in each result), and the MCP server's instructions tell the model to report such requests to you rather than act on them. That reduces the risk; it doesn't remove it.
+- Calls wait for your approval. With `APPROVAL_TOKEN` set, a call to a number you haven't approved before stops at `awaiting_approval`. Its page shows the number and the whole brief, and only someone signed in with the approval token can approve it. Claude never has that token: its API token gets a 403 on the approve and reject URLs, and calls from the `/test` form go through the same check. Once approved, the number and brief are fixed; nothing that arrives later can change where the call goes or what it says. Details in [running the agent](docs/running-the-agent.md#approving-calls).
 - The [dialling rules](docs/dialling.md) limit which numbers can be dialled at all. Emergency numbers are always refused; premium, international and short numbers are off by default.
-- `CALL_HOURS` refuses calls at night unless a single call overrides it.
+- `CALL_HOURS` refuses calls at night unless a single call overrides it, and is checked again when a waiting call finally dials.
 
-The marking reduces the risk; it doesn't remove it. The control that does is a person approving each dial: **don't auto-approve `place_call`.** In Claude Code, leave it out of `permissions.allow` so every call asks first; allowing `get_call`, `list_calls`, `hang_up` and `check_setup` is fine. Be careful with sessions that have both this server and other powerful tools, such as email or a shell on production systems, when they read incoming-call transcripts.
+Two gaps to know about. With `CALL_APPROVAL=new_numbers` (the default once the token is set), a number you approved once dials without asking next time, with whatever brief Claude writes. A caller who talks Claude into ringing your partner with a made-up message gets through if you've approved that number before. `CALL_APPROVAL=all` closes that, at the price of approving every call, extensions included. And the approval token only protects you if Claude can't read it: don't keep it anywhere a Claude session has access to, such as a `.env` it can open or a host it has SSH to.
+
+Without `APPROVAL_TOKEN`, approval falls back to your MCP client: **don't auto-approve `place_call`.** In Claude Code, leave it out of `permissions.allow` so every call asks first. Be careful with sessions that have both this server and other powerful tools, such as email or a shell on production systems, when they read incoming-call transcripts.
 
 ## The rest of the setup
 

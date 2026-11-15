@@ -87,6 +87,14 @@ class Config:
     screener_recording_notice: bool = True
     # Which numbers may be dialled (DIAL_* settings; see docs/dialling.md).
     dial_rules: DialRules = field(default_factory=DialRules)
+    # Who approves outgoing calls (see SECURITY.md). "off": they dial at once.
+    # "new_numbers": extensions, APPROVED_NUMBERS and numbers approved before dial
+    # at once; anything else waits for the owner on the call page. "all": every
+    # call waits. Approving needs APPROVAL_TOKEN, which Claude must not have.
+    call_approval: str = "off"
+    approval_token: str = ""
+    approved_numbers: list[str] = field(default_factory=list)
+    approval_hours: float = 24.0  # an unapproved call is dropped this long after it was due
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -134,7 +142,28 @@ class Config:
             credit_voice=_env("CREDIT_VOICE", "Jenny (Dioco)"),
             screener_recording_notice=_env("SCREENER_RECORDING_NOTICE", "true").lower() == "true",
             dial_rules=_dial_rules(),
+            **_approval(),
         )
+
+
+APPROVAL_MODES = ("off", "new_numbers", "all")
+
+
+def _approval() -> dict:
+    token = _env("APPROVAL_TOKEN", "").strip()
+    mode = _env("CALL_APPROVAL", "").strip().lower() or ("new_numbers" if token else "off")
+    if mode not in APPROVAL_MODES:
+        raise ValueError(f"CALL_APPROVAL must be one of {', '.join(APPROVAL_MODES)}, not {mode!r}")
+    if mode != "off" and not token:
+        raise ValueError(f"CALL_APPROVAL={mode} needs APPROVAL_TOKEN: the secret you sign in with to approve calls")
+    if token and token == _env("API_TOKEN", "").strip():
+        raise ValueError("APPROVAL_TOKEN must differ from API_TOKEN: Claude has API_TOKEN")
+    return {
+        "call_approval": mode,
+        "approval_token": token,
+        "approved_numbers": [n.strip() for n in _env("APPROVED_NUMBERS", "").split(",") if n.strip()],
+        "approval_hours": float(_env("APPROVAL_HOURS", "24")),
+    }
 
 
 def _dial_rules() -> DialRules:

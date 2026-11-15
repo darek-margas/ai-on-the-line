@@ -99,7 +99,7 @@ Check the law on recording calls where you live. In parts of Australia, recordin
 
 The agent says it's an AI when asked, and it calls on behalf of a named person. Keep it that way. Don't use it for cold calling, mass calling or anything you wouldn't do yourself on the phone. Respect calling hours and Do Not Call registers: `CALL_HOURS` blocks calls outside business hours unless you override it for a single call.
 
-Callers' words end up in front of the model that can place calls, once you ask it about a call. Don't auto-approve `place_call`; [SECURITY.md](SECURITY.md) explains what a caller can and can't reach.
+Callers' words end up in front of the model that can place calls, once you ask it about a call. Set `APPROVAL_TOKEN` and calls to new numbers wait on their page until you approve them; [SECURITY.md](SECURITY.md) explains what a caller can and can't reach.
 
 ## Licence and credits
 

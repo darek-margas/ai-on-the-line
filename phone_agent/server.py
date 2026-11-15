@@ -52,8 +52,11 @@ the owner's assistant calling on their behalf (it never claims to be the owner, 
 if asked), the questions to get answered (short snake_case names \
 plus what exactly to find out), and what the agent may share. Keep questions few and concrete.
 3. place_call returns a call_id immediately. Calls take minutes: poll get_call(call_id, \
-wait_seconds=45) until status is finished, not_answered or failed. Calls run one at a time by \
-default; extra place_call requests queue.
+wait_seconds=45) until status is finished, not_answered, failed or cancelled. Calls run one at a \
+time by default; extra place_call requests queue. Give run_at to place a call later.
+   If the status is awaiting_approval, the owner has to approve the call on its page first. You \
+can't approve it: tell the user, give them the page link, and don't place the call again. A call \
+nobody approves is cancelled with outcome "expired"; a rejected one with outcome "rejected".
 4. Read the transcript, not just the answers: speech recognition makes mistakes, and the agent \
 may have misread something. Re-call (later) if answers are missing or the callee asked to ring \
 back. Respect calling hours.
@@ -96,6 +99,13 @@ def summarize(call: dict, base_url: str) -> dict:
     duration = None
     if call.get("started") and call.get("ended"):
         duration = round(call["ended"] - call["started"])
+    schedule = call.get("schedule") or {}
+    run_at = schedule.get("run_at")
+    extra = {}
+    if schedule.get("approval") in ("needed", "approved", "rejected"):
+        extra["approval"] = schedule["approval"]
+    if run_at:
+        extra["run_at"] = datetime.fromtimestamp(run_at, ZoneInfo(schedule.get("zone") or "UTC")).isoformat(timespec="minutes")
     return {
         "untrusted": UNTRUSTED,
         "call_id": call["id"],
@@ -109,6 +119,7 @@ def summarize(call: dict, base_url: str) -> dict:
         "duration_seconds": duration,
         "error": call["error"],
         "page": f"{base_url}/calls/{call['id']}",
+        **extra,
     }
 
 
@@ -128,6 +139,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         context: str = "",
         callee_timezone: str | None = None,
         ignore_calling_hours: bool = False,
+        run_at: str | None = None,
     ) -> dict:
         """Start a phone call. Returns a call_id immediately; poll get_call for the result.
 
@@ -142,10 +154,11 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             context: Background that helps the agent handle follow-up questions.
             callee_timezone: IANA zone if the callee isn't in the default zone, for the calling-hours check.
             ignore_calling_hours: Only for test calls to the owner's own phone.
+            run_at: Place the call later: local time in the callee's timezone, "2026-11-20 09:30". Up to 30 days ahead.
         """
         return start_call(
             phone, callee, goal, opening_line, {q.name: q.description for q in questions},
-            may_share, must_not, context, callee_timezone, ignore_calling_hours,
+            may_share, must_not, context, callee_timezone, ignore_calling_hours, run_at,
         )
 
     def start_call(
@@ -159,18 +172,28 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         context: str,
         callee_timezone: str | None,
         ignore_calling_hours: bool,
+        run_at: str | None = None,
+        approved_by: str | None = None,
     ) -> dict:
         """Shared by the MCP tool and the test-call form."""
         if not questions:
             return {"error": "Give at least one question."}
-        internal = len(re.sub(r"\D", "", phone)) <= 5  # an extension, not an outside number
-        zone = ZoneInfo(callee_timezone or cfg.timezone)
-        now = datetime.now(zone)
-        start, end = cfg.call_hours
-        if not (ignore_calling_hours or internal) and not (start <= now.strftime("%H:%M") < end):
-            return {
-                "error": f"It's {now:%H:%M} {zone.key} for the callee; calling hours are {start}-{end}. Try later.",
-            }
+        try:
+            zone = ZoneInfo(callee_timezone or cfg.timezone)
+        except (KeyError, ValueError):
+            return {"error": f"Unknown timezone {callee_timezone!r}."}
+        due = None
+        if run_at:
+            try:
+                local = datetime.fromisoformat(run_at.strip())
+            except ValueError:
+                return {"error": f"run_at {run_at!r} isn't a date and time like 2026-11-20 09:30."}
+            due = (local if local.tzinfo else local.replace(tzinfo=zone)).timestamp()
+            if not time.time() - 60 < due < time.time() + 30 * 86400:
+                return {"error": "run_at must be in the next 30 days."}
+        late = manager.hours_error(phone, zone.key, ignore_calling_hours, due)
+        if late:
+            return {"error": late + (" Pick another time." if due else " Try later, or give run_at.")}
         # It must introduce itself as someone's assistant, never as the owner.
         if "assistant" not in opening_line.lower():
             opening_line = f"Hi, I'm calling as {cfg.owner_name}'s assistant. {opening_line}"
@@ -184,10 +207,14 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             context=context,
         )
         try:
-            call = manager.start_call(phone, brief)
+            call = manager.start_call(phone, brief, due, zone.key, ignore_calling_hours, approved_by)
         except ValueError as exc:
             return {"error": str(exc)}
-        return {"call_id": call.id, "status": call.status, "page": f"{base_url}/calls/{call.id}"}
+        result = {"call_id": call.id, "status": call.status, "page": f"{base_url}/calls/{call.id}"}
+        if call.status == "awaiting_approval":
+            result["note"] = ("The owner has to approve this call on its page before it's dialled. You can't "
+                              "approve it: tell the user and give them the link.")
+        return result
 
     @mcp.tool()
     async def get_call(call_id: str, wait_seconds: int = 45) -> dict:
@@ -275,8 +302,13 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             f"<td class='nowrap num'>{duration(c)}</td><td>{badge(c)}</td></tr>"
             for c in db.recent_calls(100)
         )
+        waiting = [c for c in manager.calls.values() if c.status == "awaiting_approval"]
+        banner = ""
+        if waiting:
+            links = ", ".join(f"<a href='/calls/{c.id}'>{html.escape(c.brief.callee)}</a>" for c in waiting)
+            banner = f"<p class='approve-note'><b>Waiting for your approval:</b> {links}</p>"
         body = (
-            "<h1>Calls</h1>"
+            "<h1>Calls</h1>" + banner +
             "<div class='scroll'><table><tr><th>When</th><th></th><th>Who</th><th>Length</th><th>Result</th></tr>"
             f"{rows or '<tr><td colspan=5 class=muted>No calls yet.</td></tr>'}</table></div>"
             f"<p class='muted'>Times are {html.escape(cfg.timezone)}.</p>"
@@ -304,6 +336,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
                 form["phone"], form["callee"], form["goal"] or "Get answers to the questions.",
                 form["opening_line"], questions,
                 [l.strip() for l in form["may_share"].splitlines() if l.strip()], None, "", None, False,
+                approved_by="the owner, from the test form" if approver(request) else None,
             )
             if "call_id" in result:
                 return RedirectResponse(f"/calls/{result['call_id']}", status_code=303)
@@ -365,19 +398,74 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
                 if call["status"] in ("finished", "not_answered", "failed") and call["transcript"] else ""
             )
         started = when(call["started"] or call["created"], "%A %d %B %Y, %H:%M:%S")
+        schedule = call.get("schedule") or {}
+        approval = ""
+        if call["status"] in ("awaiting_approval", "scheduled"):
+            due = schedule.get("run_at")
+            due_text = f"at {when(due, '%A %d %B, %H:%M')} ({esc(cfg.timezone)})" if due else "as soon as it's approved"
+            questions = "".join(f"<li>{esc(q)}</li>" for q in (brief.get("questions") or {}).values())
+            shared = "".join(f"<li>{esc(x)}</li>" for x in brief.get("may_share") or [])
+            details = (
+                f"<p>Dials <b>{esc(call['phone'])}</b> {due_text}.</p>"
+                f"<p><b>Opening line:</b> {esc(brief.get('opening_line') or '')}</p>"
+                f"<p><b>Questions</b></p><ul>{questions}</ul>"
+                + (f"<p><b>May tell them</b></p><ul>{shared}</ul>" if shared else "")
+                + (f"<p><b>Context:</b> {esc(brief['context'])}</p>" if brief.get("context") else "")
+            )
+            if call["status"] == "scheduled":
+                approval = f"<div class='approve'><h2>Scheduled</h2>{details}</div>"
+            elif approver(request):
+                remember = (
+                    "<label class='check'><input type='checkbox' name='remember' value='1' checked> "
+                    "Approve this number for later calls too</label>"
+                    if cfg.call_approval == "new_numbers" else ""
+                )
+                approval = (
+                    f"<div class='approve'><h2>Waiting for your approval</h2>{details}"
+                    "<p class='muted'>Check the number and what it will say. Claude wrote this brief; if it came "
+                    "from something a caller said, reject it.</p>"
+                    f"<form method='post' action='/calls/{cid}/approve'>{remember}"
+                    "<button>Approve</button> "
+                    f"<button class='secondary' formaction='/calls/{cid}/reject'>Reject</button></form></div>"
+                )
+            else:
+                approval = (
+                    f"<div class='approve'><h2>Waiting for approval</h2>{details}"
+                    f"<p><a href='/login?next=/calls/{cid}'>Sign in with the approval token</a> to approve or "
+                    "reject it.</p></div>"
+                )
         body = (
             f"<h1>{direction_icon(call)} {esc(call['callee'] or '')}</h1>"
             f"<p class='meta'>{badge(call)} <span>{esc(call['phone'])}</span> <span>{started}</span>"
             f"{f'<span>{duration(call)}</span>' if duration(call) else ''}</p>"
-            f"{'<p class=error>' + esc(call['error']) + '</p>' if call['error'] else ''}{audio}"
+            f"{'<p class=error>' + esc(call['error']) + '</p>' if call['error'] else ''}{approval}{audio}"
             f"<h2>Goal</h2><p>{esc(brief['goal'])}</p>"
             f"<h2>{'What they said' if inbound else 'Answers'}</h2>"
             f"<table class='answers'>{answers or '<tr><td class=muted>none yet</td></tr>'}</table>"
             f"{'<h2>Notes</h2><ul>' + notes + '</ul>' if notes else ''}"
             f"<h2>Transcript</h2><div class='transcript'>{lines or '<p class=muted>none yet</p>'}</div>"
         )
-        live = call["status"] not in ("finished", "not_answered", "failed")
+        live = call["status"] in LIVE  # not while it waits: the page would reload under your finger
         return HTMLResponse(page(call["callee"] or "Call", body, refresh=live))
+
+    @mcp.custom_route("/calls/{call_id}/approve", methods=["POST"])
+    async def approve_call(request: Request) -> Response:
+        if not approver(request):
+            return HTMLResponse(page("Not allowed", "<p>Approving needs the approval token.</p>"), status_code=403)
+        form = parse_qs((await request.body()).decode())
+        call_id = request.path_params["call_id"]
+        if manager.approve(call_id, remember=form.get("remember") == ["1"]):
+            log.info("call %s approved by the owner", call_id)
+        return RedirectResponse(f"/calls/{call_id}", status_code=303)
+
+    @mcp.custom_route("/calls/{call_id}/reject", methods=["POST"])
+    async def reject_call(request: Request) -> Response:
+        if not approver(request):
+            return HTMLResponse(page("Not allowed", "<p>Rejecting needs the approval token.</p>"), status_code=403)
+        call_id = request.path_params["call_id"]
+        if manager.reject(call_id):
+            log.info("call %s rejected by the owner", call_id)
+        return RedirectResponse(f"/calls/{call_id}", status_code=303)
 
     @mcp.custom_route("/recordings/{call_id}.wav", methods=["GET"])
     async def recording(request: Request) -> Response:
@@ -452,6 +540,12 @@ FAVICON = (
     "0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z'/%3E%3C/svg%3E"
 )
 LIVE = {"queued", "dialing", "ringing", "connected"}
+WAITING = {"awaiting_approval", "scheduled"}
+
+
+def approver(request: Request) -> bool:
+    """Signed in with APPROVAL_TOKEN (see auth.py)."""
+    return bool(request.scope.get("state", {}).get("approver"))
 GOOD = {"completed"}
 BAD = {"failed", "technical_failure"}
 
@@ -466,8 +560,8 @@ def duration(call: dict) -> str:
 
 def badge(call: dict) -> str:
     """The call's result as a coloured label: live, its outcome, or how it failed."""
-    label = call["status"] if call["status"] in LIVE or not call["outcome"] else call["outcome"]
-    kind = "live" if call["status"] in LIVE else "good" if label in GOOD else "bad" if label in BAD or call["status"] in BAD else "plain"
+    label = call["status"] if call["status"] in LIVE | WAITING or not call["outcome"] else call["outcome"]
+    kind = "wait" if call["status"] in WAITING else "live" if call["status"] in LIVE else "good" if label in GOOD else "bad" if label in BAD or call["status"] in BAD else "plain"
     return f"<span class='badge {kind}'>{html.escape(label.replace('_', ' '))}</span>"
 
 
@@ -492,9 +586,10 @@ def page(title: str, body: str, refresh: bool = False) -> str:
 <link rel='icon' href="{FAVICON}">
 <title>{html.escape(title)}</title><style>
 :root {{ color-scheme: light dark; --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6ea;
-  --accent: #2f6fb3; --good: #1f8a4c; --bad: #c0392b; --live: #2f6fb3; --agent: #eaf2fb; }}
+  --accent: #2f6fb3; --good: #1f8a4c; --bad: #c0392b; --live: #2f6fb3; --agent: #eaf2fb; --warn: #b26a00; }}
 @media (prefers-color-scheme: dark) {{ :root {{ --bg: #14171c; --card: #1c2027; --text: #e6e8eb; --muted: #9aa3ad;
-  --line: #2c323b; --accent: #6aa5e8; --good: #4cc282; --bad: #ef6b5b; --live: #6aa5e8; --agent: #1f2c3d; }} }}
+  --line: #2c323b; --accent: #6aa5e8; --good: #4cc282; --bad: #ef6b5b; --live: #6aa5e8; --agent: #1f2c3d;
+  --warn: #f0a640; }} }}
 * {{ box-sizing: border-box; }}
 body {{ font: 15px/1.5 system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--text); }}
 header {{ background: var(--card); border-bottom: 1px solid var(--line); }}
@@ -517,7 +612,13 @@ table.answers th {{ width: 30%; text-transform: capitalize; color: var(--text); 
 .downloads b {{ margin-right: 6px; }}
 .badge {{ display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap;
   border: 1px solid currentColor; color: var(--muted); }}
-.badge.good {{ color: var(--good); }} .badge.bad {{ color: var(--bad); }}
+.badge.good {{ color: var(--good); }} .badge.bad {{ color: var(--bad); }} .badge.wait {{ color: var(--warn); }}
+.approve {{ background: var(--card); border: 2px solid var(--warn); border-radius: 10px; padding: 4px 16px 14px; margin: 12px 0; }}
+.approve h2 {{ color: var(--warn); }}
+.approve-note {{ background: var(--card); border-left: 4px solid var(--warn); padding: 8px 12px; }}
+label.check {{ font-weight: normal; display: flex; gap: 8px; align-items: center; }}
+label.check input {{ width: auto; margin: 0; }}
+button.secondary {{ background: transparent; color: var(--bad); border: 1px solid var(--bad); }}
 .badge.live {{ color: var(--live); animation: pulse 1.5s infinite; }}
 @keyframes pulse {{ 50% {{ opacity: .45; }} }}
 .dir {{ font-weight: 700; font-size: 17px; }} .dir.in {{ color: var(--good); }} .dir.out {{ color: var(--accent); }}
@@ -558,14 +659,18 @@ async def main() -> None:
     ari = Ari(cfg.ari_url, cfg.ari_user, cfg.ari_password)
     manager = CallManager(cfg, db, speech, dialog, ari)
     mcp = build_app(cfg, manager, db, speech, dialog, ari)
+    log.info("call approval: %s", cfg.call_approval)
+    waiting = manager.resume_pending()
+    if waiting:
+        log.info("%d call(s) still waiting for approval or their time", waiting)
 
     audiosocket = await asyncio.start_server(manager.handle_audiosocket, *cfg.audiosocket_bind)
     log.info("AudioSocket listening on %s:%s", *cfg.audiosocket_bind)
     preload = asyncio.create_task(dialog.preload())  # Ollama only; runs in the background
     app = mcp.streamable_http_app(host=cfg.http_host)
-    if cfg.api_token:
-        app = TokenAuth(app, cfg.api_token)
-    else:
+    if cfg.api_token or cfg.approval_token:
+        app = TokenAuth(app, cfg.api_token, cfg.approval_token)
+    if not cfg.api_token:
         log.warning("API_TOKEN is not set: anyone who can reach port %s can place calls", cfg.http_port)
     server = uvicorn.Server(uvicorn.Config(app, host=cfg.http_host, port=cfg.http_port, log_level="info"))
     async with audiosocket:

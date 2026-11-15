@@ -5,6 +5,7 @@
 import json
 import os
 import sqlite3
+import time
 from typing import Any
 
 SCHEMA = """
@@ -14,7 +15,8 @@ CREATE TABLE IF NOT EXISTS calls (
     phone TEXT NOT NULL,
     callee TEXT,
     brief TEXT NOT NULL,           -- JSON
-    status TEXT NOT NULL,          -- queued | dialing | connected | finished | not_answered | failed
+    status TEXT NOT NULL,          -- awaiting_approval | scheduled | queued | dialing | connected
+                                   -- | finished | not_answered | failed | cancelled
     outcome TEXT,
     answers TEXT,                  -- JSON {question: answer}
     notes TEXT,                    -- JSON list
@@ -23,11 +25,18 @@ CREATE TABLE IF NOT EXISTS calls (
     recording TEXT,
     started REAL,
     ended REAL,
-    error TEXT
+    error TEXT,
+    schedule TEXT                  -- JSON: run_at, calling-hours zone, approval
+);
+CREATE TABLE IF NOT EXISTS approved_numbers (
+    number TEXT PRIMARY KEY,       -- as dialled (after the dialling rules)
+    added REAL NOT NULL,
+    call_id TEXT                   -- the call it was approved with
 );
 """
 
-JSON_COLUMNS = ("brief", "answers", "notes", "transcript", "timings")
+JSON_COLUMNS = ("brief", "answers", "notes", "transcript", "timings", "schedule")
+PENDING = ("awaiting_approval", "scheduled")
 
 
 class Database:
@@ -40,14 +49,30 @@ class Database:
         columns = {row[1] for row in self.conn.execute("PRAGMA table_info(calls)")}
         if "timings" not in columns:  # databases from before 2026.11.1.1
             self.conn.execute("ALTER TABLE calls ADD COLUMN timings TEXT")
-            self.conn.commit()
+        if "schedule" not in columns:  # databases from before 2026.11.2.0
+            self.conn.execute("ALTER TABLE calls ADD COLUMN schedule TEXT")
+        self.conn.commit()
 
     def fail_unfinished_calls(self) -> None:
-        """At service start: calls that were live when it stopped can't be resumed."""
+        """At service start: calls that were live when it stopped can't be resumed.
+        Calls still waiting for approval or their time are picked up again."""
         self.conn.execute(
             "UPDATE calls SET status = 'failed', error = 'service restarted' "
             "WHERE status IN ('queued', 'dialing', 'ringing', 'connected')"
         )
+        self.conn.commit()
+
+    def pending_calls(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            f"SELECT * FROM calls WHERE status IN ({', '.join('?' for _ in PENDING)}) ORDER BY created", PENDING
+        ).fetchall()
+        return [self._decode(r) for r in rows]
+
+    def number_approved(self, number: str) -> bool:
+        return self.conn.execute("SELECT 1 FROM approved_numbers WHERE number = ?", (number,)).fetchone() is not None
+
+    def approve_number(self, number: str, call_id: str) -> None:
+        self.conn.execute("INSERT OR IGNORE INTO approved_numbers VALUES (?, ?, ?)", (number, time.time(), call_id))
         self.conn.commit()
 
     def save_call(self, call: dict[str, Any]) -> None:

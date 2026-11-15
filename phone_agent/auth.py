@@ -4,6 +4,9 @@
 
 MCP clients send "Authorization: Bearer <token>". Browsers get a small login form that
 sets a cookie, so the status-page links in tool results still open with one sign-in.
+
+A second secret, APPROVAL_TOKEN, opens everything API_TOKEN does and also lets
+you approve calls. Requests made with it carry scope["state"]["approver"] = True.
 """
 
 import hmac
@@ -19,11 +22,19 @@ COOKIE_DAYS = 90
 
 
 class TokenAuth:
-    def __init__(self, app, token: str):
+    def __init__(self, app, token: str, approval_token: str = ""):
         self.app = app
         self.token = token.encode()
+        self.approval_token = approval_token.encode()
+
+    def _approver(self, value: str | None) -> bool:
+        return bool(value and self.approval_token) and hmac.compare_digest(value.encode(), self.approval_token)
 
     def _valid(self, value: str | None) -> bool:
+        if self._approver(value):
+            return True
+        if not self.token:  # ALLOW_NO_AUTH: viewing is open, approving still needs the token
+            return True
         return bool(value) and hmac.compare_digest(value.encode(), self.token)
 
     def _presented(self, headers: dict[bytes, bytes]) -> str | None:
@@ -40,7 +51,9 @@ class TokenAuth:
         path = scope["path"]
         if path == "/login":
             return await self._login(scope, receive, send, headers)
-        if self._valid(self._presented(headers)):
+        presented = self._presented(headers)
+        if self._valid(presented):
+            scope.setdefault("state", {})["approver"] = self._approver(presented)
             return await self.app(scope, receive, send)
         if scope["method"] == "GET" and b"text/html" in headers.get(b"accept", b""):
             target = path + ("?" + scope["query_string"].decode() if scope["query_string"] else "")
@@ -63,8 +76,9 @@ class TokenAuth:
                 body += message.get("body", b"")
                 if not message.get("more_body"):
                     break
-            if self._valid(parse_qs(body.decode()).get("token", [""])[0].strip()):
-                cookie = (f"{COOKIE}={self.token.decode()}; Path=/; HttpOnly; SameSite=Lax; "
+            entered = parse_qs(body.decode()).get("token", [""])[0].strip()
+            if entered and self._valid(entered):
+                cookie = (f"{COOKIE}={entered}; Path=/; HttpOnly; SameSite=Lax; "
                           f"Max-Age={COOKIE_DAYS * 86400}")
                 if scope.get("scheme") == "https" or headers.get(b"x-forwarded-proto") == b"https":
                     cookie += "; Secure"
@@ -73,7 +87,7 @@ class TokenAuth:
             error = "<p class='error'>Wrong token.</p>"
         from .server import page  # the shared page style; imported late to avoid a cycle
         form = (f"<h1>Phone agent</h1>{error}<form method='post' action='/login?next={html.escape(quote(target))}'>"
-                "<label>Access token<input name='token' type='password' autofocus required></label>"
+                "<label>Access or approval token<input name='token' type='password' autofocus required></label>"
                 "<button>Sign in</button></form>")
         await _respond(send, 401 if error else 200, page("Sign in", form).encode(),
                        [(b"content-type", b"text/html; charset=utf-8")])

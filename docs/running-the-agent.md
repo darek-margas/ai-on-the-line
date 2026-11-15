@@ -23,8 +23,9 @@ Everything is in `.env`; [.env.example](../.env.example) lists every setting wit
 - `ARI_*`, `AMI_*`, `AUDIOSOCKET_ADVERTISE`, `DIAL_ENDPOINT`: the Asterisk connection, see the FreePBX guide.
 - `DIAL_*`: which numbers may be dialled, see [dialling.md](dialling.md).
 - `API_TOKEN`: required. `openssl rand -hex 32` makes one.
+- `APPROVAL_TOKEN`: recommended. A second secret, for approving calls in the browser; Claude never gets it. With it set, calls to numbers you haven't approved before wait on their page until you approve them (`CALL_APPROVAL`, see [Approving calls](#approving-calls)).
 
-Secrets can go in `secrets.env` next to `.env` (`API_TOKEN`, `ANTHROPIC_API_KEY`, `ARI_PASSWORD`). The compose file reads it if it exists, so `.env` can be shared or kept in git without them.
+Secrets can go in `secrets.env` next to `.env` (`API_TOKEN`, `APPROVAL_TOKEN`, `ANTHROPIC_API_KEY`, `ARI_PASSWORD`). The compose file reads it if it exists, so `.env` can be shared or kept in git without them.
 
 ## Speech
 
@@ -99,15 +100,25 @@ Then ask it to run `check_setup`, and to call the test receptionist on 7999.
 
 The tools are `place_call`, `get_call`, `list_calls`, `hang_up` and `check_setup`. Calls take minutes, so Claude places a call and then polls `get_call`. The MCP server's own instructions tell it how to write a brief and report back, so a plain request like "ring these three motels and ask about a family room on the 12th" works.
 
-Let Claude ask before every `place_call`: in Claude Code, don't add it to `permissions.allow`. The other four tools are safe to allow. Transcripts carry callers' words into the session that can dial, and a person approving each call is what stops a caller from talking it into one. More in [SECURITY.md](../SECURITY.md).
+A person has to approve each call somewhere, because transcripts carry callers' words into the session that can dial. Either set `APPROVAL_TOKEN` (below), or don't add `place_call` to Claude Code's `permissions.allow` so it asks before every call. With approval in the agent, allowing all five tools is fine, and scheduled or unattended Claude runs can place calls that wait for you. More in [SECURITY.md](../SECURITY.md).
+
+### Approving calls
+
+With `APPROVAL_TOKEN` set, `place_call` still returns at once, but a call to a number that isn't approved yet gets the status `awaiting_approval` and doesn't dial. Claude is told it can't approve it and gives you the link. The call page shows the number, the time, the opening line, the questions and what it may tell them, with Approve and Reject buttons. The call list shows a line for every call waiting.
+
+Sign in on the page with the approval token instead of the API token; it opens everything the API token does and adds the buttons. Claude's API token gets a 403 on approve, also through the web pages, so a session that has the token and a shell can't approve its own calls.
+
+Approving can remember the number (`new_numbers`, the default once the token is set). Extensions and `APPROVED_NUMBERS` never wait. `CALL_APPROVAL=all` asks every time. Nothing approved within `APPROVAL_HOURS` (24) of the call being due is cancelled with outcome `expired`.
+
+`place_call` takes `run_at`, a local time like `2026-11-20 09:30` up to 30 days ahead. The call shows as `scheduled` and dials then; approve it any time before. Calling hours are checked when it's placed and again when it dials. Waiting and scheduled calls survive a restart of the container.
 
 ## The web pages
 
 Port 8090 also serves a few pages for people. The first visit asks for the API token and sets a cookie, so the call links in Claude's reports open straight away after that.
 
 - **`/`**, the call list: every call, newest first, with direction, who, length and result. It refreshes itself.
-- **`/calls/<id>`**, one call: the goal, the answers or message, notes and the full transcript. While a call is live, the page refreshes and the transcript grows.
-- **`/test`**, a form for trying the agent without Claude: a number or extension, an opening line and one question per line. Extensions can be called any time; outside numbers only within calling hours.
+- **`/calls/<id>`**, one call: the goal, the answers or message, notes and the full transcript. While a call is live, the page refreshes and the transcript grows. A call waiting for approval shows its brief and, when you're signed in with the approval token, Approve and Reject.
+- **`/test`**, a form for trying the agent without Claude: a number or extension, an opening line and one question per line. Extensions can be called any time; outside numbers only within calling hours. Signed in with the approval token, calls from the form count as approved.
 
 With the PBX recordings mounted (`RECORDINGS_DIR`), a call page has a player and one Download line under it:
 

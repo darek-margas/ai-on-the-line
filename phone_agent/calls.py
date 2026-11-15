@@ -8,7 +8,9 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from . import audiosocket as ass
 from .ami import Ami
@@ -23,7 +25,8 @@ from .speech import Speech
 
 log = logging.getLogger(__name__)
 
-FINAL_STATUSES = {"finished", "not_answered", "failed"}
+FINAL_STATUSES = {"finished", "not_answered", "failed", "cancelled"}
+PENDING_STATUSES = {"awaiting_approval", "scheduled"}  # not dialling yet, hold no slot
 INBOUND_CONNECT_SECONDS = 30  # registered incoming call whose audio never arrives
 
 
@@ -47,6 +50,10 @@ class CallState:
     started: float | None = None
     ended: float | None = None
     error: str | None = None
+    # run_at, zone, ignore_hours (calling-hours check), approval: "not_needed" |
+    # "needed" | "approved" | "rejected", approval_note, approved_at.
+    schedule: dict[str, Any] = field(default_factory=dict)
+    wake: asyncio.Event = field(default_factory=asyncio.Event)  # approved, rejected or cancelled
     connected: asyncio.Event = field(default_factory=asyncio.Event)
     conversation_over: asyncio.Event = field(default_factory=asyncio.Event)
     done: asyncio.Event = field(default_factory=asyncio.Event)  # final state saved
@@ -89,6 +96,7 @@ class CallState:
             "started": self.started,
             "ended": self.ended,
             "error": self.error,
+            "schedule": self.schedule,
         }
 
 
@@ -104,15 +112,125 @@ class CallManager:
         self._slots = asyncio.Semaphore(cfg.max_concurrent_calls)
         self._tasks: set[asyncio.Task] = set()
 
-    def start_call(self, phone: str, brief: Brief) -> CallState:
+    def start_call(self, phone: str, brief: Brief, run_at: float | None = None, zone: str | None = None,
+                   ignore_hours: bool = False, approved_by: str | None = None) -> CallState:
+        """Queue an outgoing call. It may first wait for the owner's approval
+        (CALL_APPROVAL) and for run_at. approved_by: who already approved it."""
+        number = normalize_number(phone, self.cfg.dial_rules)  # refuse before queueing
+        why = approved_by or self.auto_approval(number)
         call = CallState(id=str(uuid.uuid4()), phone=phone, brief=brief, owner=self.cfg.owner_name, db=self.db)
-        normalize_number(phone, self.cfg.dial_rules)  # refuse before queueing
+        call.schedule = {
+            "run_at": run_at,
+            "zone": zone or self.cfg.timezone,
+            "ignore_hours": ignore_hours,
+            "approval": "not_needed" if why else "needed",
+            "approval_note": why or "",
+        }
+        call.status = "awaiting_approval" if not why else "scheduled" if run_at and run_at > time.time() else "queued"
         self.calls[call.id] = call
         call.changed()
+        self._spawn(call)
+        return call
+
+    def _spawn(self, call: CallState) -> None:
         task = asyncio.create_task(self._run(call))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
-        return call
+
+    def auto_approval(self, number: str) -> str | None:
+        """Why a call to this number needs no approval, or None if it does."""
+        mode = self.cfg.call_approval
+        if mode == "off":
+            return "approval is off"
+        if mode == "all":
+            return None
+        rules = self.cfg.dial_rules
+        if rules.extensions and re.fullmatch(rules.extensions, number):
+            return "internal extension"
+        listed = set()
+        for entry in self.cfg.approved_numbers:
+            try:
+                listed.add(normalize_number(entry, rules))
+            except ValueError:
+                pass
+        if number in listed:
+            return "in APPROVED_NUMBERS"
+        if self.db.number_approved(number):
+            return "number approved before"
+        return None
+
+    def approve(self, call_id: str, remember: bool = False) -> bool:
+        call = self.calls.get(call_id)
+        if call is None or call.status != "awaiting_approval":
+            return False
+        call.schedule.update(approval="approved", approval_note="approved by the owner", approved_at=time.time())
+        run_at = call.schedule.get("run_at")
+        call.status = "scheduled" if run_at and run_at > time.time() else "queued"
+        if remember and self.cfg.call_approval == "new_numbers":
+            self.db.approve_number(normalize_number(call.phone, self.cfg.dial_rules), call.id)
+        call.changed()
+        call.wake.set()
+        return True
+
+    def reject(self, call_id: str) -> bool:
+        call = self.calls.get(call_id)
+        if call is None or call.status != "awaiting_approval":
+            return False
+        call.schedule["approval"] = "rejected"
+        call.set_outcome("rejected")
+        call.status = "cancelled"
+        call.changed()
+        call.wake.set()
+        return True
+
+    def resume_pending(self) -> int:
+        """At start: calls that were waiting for approval or their time wait on."""
+        rows = self.db.pending_calls()
+        for row in rows:
+            call = CallState(id=row["id"], phone=row["phone"], brief=Brief(**row["brief"]), owner=self.cfg.owner_name,
+                             db=self.db, created=row["created"], status=row["status"], schedule=row["schedule"] or {})
+            self.calls[call.id] = call
+            self._spawn(call)
+        return len(rows)
+
+    def hours_error(self, phone: str, zone: str, ignore: bool, at: float | None = None) -> str | None:
+        """Why the call can't go out at `at` (default now) under CALL_HOURS, or None."""
+        if ignore or len(re.sub(r"\D", "", phone)) <= 5:  # extensions ring any time
+            return None
+        tz = ZoneInfo(zone)
+        local = datetime.fromtimestamp(at or time.time(), tz)
+        start, end = self.cfg.call_hours
+        if start <= local.strftime("%H:%M") < end:
+            return None
+        return f"It's {local:%H:%M} {tz.key} for the callee then; calling hours are {start}-{end}."
+
+    async def _go_ahead(self, call: CallState) -> bool:
+        """Wait for approval and for run_at. False: rejected, cancelled or expired."""
+        while True:
+            call.wake.clear()
+            if call.status == "cancelled":
+                return False
+            if call.outcome == "hung_up_by_owner":
+                call.status = "cancelled"
+                return False
+            now = time.time()
+            run_at = call.schedule.get("run_at")
+            if call.schedule.get("approval") == "needed":
+                deadline = (run_at or call.created) + self.cfg.approval_hours * 3600
+                if now >= deadline:
+                    call.status = "cancelled"
+                    call.set_outcome("expired")
+                    call.error = "Nobody approved it in time."
+                    return False
+                wait = deadline - now
+            elif run_at and run_at > now:
+                wait = run_at - now
+            else:
+                return True
+            try:
+                await asyncio.wait_for(call.wake.wait(), min(wait, 3600))
+            except TimeoutError:
+                pass
 
     async def register_inbound(self, call_id: str, caller: str, diverted_from: str, profile: str) -> CallState:
         """The PBX is about to hand us an incoming call: set it up before its
@@ -166,7 +284,8 @@ class CallManager:
 
     def busy(self) -> bool:
         """A call is being set up or is in progress."""
-        return any(c.status not in FINAL_STATUSES and c.status != "queued" for c in self.calls.values())
+        idle = FINAL_STATUSES | PENDING_STATUSES | {"queued"}
+        return any(c.status not in idle for c in self.calls.values())
 
     def get(self, call_id: str) -> dict[str, Any] | None:
         if call_id in self.calls:
@@ -187,6 +306,7 @@ class CallManager:
         if call is None or call.status in FINAL_STATUSES:
             return False
         call.set_outcome("hung_up_by_owner")
+        call.wake.set()  # stops a call that's waiting for approval or its time
         if call.channel_id:
             await self.ari.hangup(call.channel_id)
         # A call still queued or warming up is stopped by _run before it dials.
@@ -194,6 +314,17 @@ class CallManager:
 
     async def _run(self, call: CallState) -> None:
         try:
+            if not await self._go_ahead(call):
+                return
+            if call.status != "queued":
+                call.status = "queued"
+                call.changed()
+            s = call.schedule
+            late = self.hours_error(call.phone, s.get("zone") or self.cfg.timezone, bool(s.get("ignore_hours")))
+            if late:
+                call.status = "failed"
+                call.error = f"Not dialled: {late}"
+                return
             async with self._slots:
                 # Wake the LLM and Whisper and pre-render both openings before
                 # dialing, so the callee never waits on a cold start.
