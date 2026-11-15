@@ -33,7 +33,7 @@ Only the files that exist go in. Phone numbers and the brief aren't included.
 
 ## From a call the agent made or answered
 
-The call page has two links under the transcript: **re-voiced** and **original audio**. Both need `RECORDINGS_DIR` pointing at the PBX's recordings (see [the FreePBX guide](asterisk-freepbx.md#12-recordings-in-the-container)). Without it there's a single link with the transcript and timings only.
+The call page has a Download line under the player: the recording with credit, and the test sample **re-voiced** or with **original audio**. Both need `RECORDINGS_DIR` pointing at the PBX's recordings (see [the FreePBX guide](asterisk-freepbx.md#12-recordings-in-the-container)). Without it there's a single link with the transcript and timings only.
 
 Re-voicing sends every stretch of speech through Whisper and Piper, so it takes a few seconds: about 7 for a 46-second call on my setup. It's refused while a call is in progress, so it doesn't slow down a live call.
 

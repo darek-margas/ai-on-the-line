@@ -13,7 +13,7 @@ body:
         timing, so nobody's real voice ends up in this issue. Original audio is only OK if every
         voice on it is yours.
 
-        **From a call the agent made or answered:** the call page, **re-voiced** link under the transcript.
+        **From a call the agent made or answered:** the call page, **re-voiced** link in the Download line under the player.
 
         **From any FreePBX recording:**
 

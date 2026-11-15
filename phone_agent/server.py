@@ -334,13 +334,28 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             f"<div class='line {who}'><span class='who'>{'Agent' if who == 'agent' else other}</span>{esc(text)}</div>"
             for who, text in call["transcript"] or []
         )
-        audio = ""
+        cid = call["id"]
         if cfg.recordings_dir and call["recording"]:
-            # The download carries the credit; the line below is for pasting under a post.
+            # Every download sits next to the player. The recording download carries
+            # the credit; the line after it is for pasting under a post.
             audio = (
-                f"<audio controls src='/recordings/{call['id']}.wav'></audio>"
-                f"<p class='muted'><a href='/recordings/{call['id']}/download.wav'>Download with credit</a>"
-                f" &middot; if you publish it: {esc(credit_line(cfg.credit_voice))}</p>"
+                f"<audio controls src='/recordings/{cid}.wav'></audio>"
+                f"<p class='downloads'><b>Download</b> "
+                f"<a href='/recordings/{cid}/download.wav'>recording with credit</a> &middot; "
+                f"test sample: <a href='/calls/{cid}/sample.zip?revoice=1'>re-voiced</a> "
+                f"or <a href='/calls/{cid}/sample.zip'>original audio</a></p>"
+                f"<p class='muted'>If you publish the recording: {esc(credit_line(cfg.credit_voice))}<br>"
+                "Test samples are for tuning: each side's audio and the transcript with timings, text redacted. "
+                "Re-voiced replaces every voice with the agent's at the same timing; read its transcript, then "
+                "it can be shared. Keep the original to yourself.</p>"
+            )
+        else:
+            audio = (
+                f"<p class='downloads'><b>Download</b> <a href='/calls/{cid}/sample.zip'>test sample</a> "
+                "(transcript with timings, text redacted)</p>"
+                "<p class='muted'>No recording here: mount the PBX recordings (RECORDINGS_DIR) for the player, "
+                "the recording and audio in test samples.</p>"
+                if call["status"] in ("finished", "not_answered", "failed") and call["transcript"] else ""
             )
         started = when(call["started"] or call["created"], "%A %d %B %Y, %H:%M:%S")
         body = (
@@ -353,16 +368,6 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             f"<table class='answers'>{answers or '<tr><td class=muted>none yet</td></tr>'}</table>"
             f"{'<h2>Notes</h2><ul>' + notes + '</ul>' if notes else ''}"
             f"<h2>Transcript</h2><div class='transcript'>{lines or '<p class=muted>none yet</p>'}</div>"
-            + (
-                f"<p class='muted'>Test sample, for tuning and tests: "
-                f"<a href='/calls/{call['id']}/sample.zip?revoice=1'>re-voiced</a> (every voice replaced by the "
-                "agent's, same timing; read the transcript, then share it) or "
-                f"<a href='/calls/{call['id']}/sample.zip'>original audio</a> (keep it private). "
-                "Both have the transcript with timings, text redacted.</p>"
-                if cfg.recordings_dir and call["recording"] else
-                f"<p class='muted'><a href='/calls/{call['id']}/sample.zip'>Test sample</a>: the transcript with "
-                "timings, text redacted. Mount the PBX recordings (RECORDINGS_DIR) to include audio.</p>"
-            )
         )
         live = call["status"] not in ("finished", "not_answered", "failed")
         return HTMLResponse(page(call["callee"] or "Call", body, refresh=live))
@@ -501,6 +506,8 @@ th {{ font-size: 13px; color: var(--muted); font-weight: 600; }}
 table.answers th {{ width: 30%; text-transform: capitalize; color: var(--text); }}
 .nowrap {{ white-space: nowrap; }} .num {{ font-variant-numeric: tabular-nums; }}
 .muted {{ color: var(--muted); font-size: 13px; }}
+.downloads {{ margin: 10px 0 4px; font-size: 15px; }}
+.downloads b {{ margin-right: 6px; }}
 .badge {{ display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap;
   border: 1px solid currentColor; color: var(--muted); }}
 .badge.good {{ color: var(--good); }} .badge.bad {{ color: var(--bad); }}
