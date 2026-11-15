@@ -20,7 +20,7 @@ import soxr
 
 from . import audiosocket as ass
 from . import dtmf
-from .dialog import Dialog, Turn
+from .dialog import Dialog, Turn, says_goodbye
 from .speech import Speech
 from .vad import Segmenter
 
@@ -549,6 +549,12 @@ class CallSession:
                 self._farewell_said = True
                 continue
             if turn.end_call:
+                talked = any(who == "callee" for who, _ in call.transcript)
+                if talked and turn.outcome != "voicemail" and not says_goodbye(turn.say):
+                    # Some models end the call on "No thanks, I'm just checking." A
+                    # person on the other end would notice the missing goodbye.
+                    log.info("call %s: ending without a goodbye; adding one", call.id)
+                    await self._say("Thanks, bye!")
                 if await self._still_talking_after_goodbye():
                     pending_event = (
                         "They kept talking after your goodbye (their words are at the end of the "

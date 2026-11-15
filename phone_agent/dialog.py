@@ -280,6 +280,23 @@ class SayStream:
         return [x for x in sentences if x]
 
 
+def clean_notes(notes: str) -> str:
+    """Smaller local models sometimes put a status ("in_progress") or "none"
+    in the notes field. Those aren't notes."""
+    notes = notes.strip()
+    bare = notes.strip(" .").lower().replace(" ", "_")
+    if bare in OUTCOMES or bare in ("none", "no_notes", "nothing", "-") or NON_ANSWER.match(notes):
+        return ""
+    return notes
+
+
+GOODBYE = re.compile(r"\b(bye|goodbye|take care|see (you|ya)|have a (good|nice|great|lovely) \w+|cheers)\b", re.I)
+
+
+def says_goodbye(text: str) -> bool:
+    return bool(GOODBYE.search(text or ""))
+
+
 def is_real_answer(answer: str) -> bool:
     """Drop placeholders the model sometimes records instead of leaving a question open."""
     answer = answer.strip()
@@ -377,7 +394,7 @@ class Dialog:
             say=soften_laughs(data.get("say", "").strip()),
             dtmf="".join(c for c in data.get("dtmf", "") if c in "0123456789*#"),
             answers={a["question"]: a["answer"] for a in data.get("answers", []) if is_real_answer(a.get("answer", ""))},
-            notes=data.get("notes", "").strip(),
+            notes=clean_notes(data.get("notes", "")),
             end_call=bool(data.get("end_call")),
             outcome=data.get("outcome", "in_progress"),
             spoken=spoken,

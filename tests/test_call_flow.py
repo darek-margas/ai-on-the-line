@@ -764,3 +764,38 @@ def test_dialog_streams_say_from_ollama():
     assert sent["stream"] is True and sent["think"] is False
     assert heard == ["Sure.", "Which day suits you?"]
     assert turn.spoken and turn.say == "Sure. Which day suits you?"
+
+
+def test_clean_notes_and_goodbye():
+    from phone_agent.dialog import clean_notes, says_goodbye
+
+    for junk in ("in_progress", "In progress.", "completed", "none", "N/A", "unknown", ""):
+        assert clean_notes(junk) == "", junk
+    assert clean_notes(" Callee offered to book the room. ") == "Callee offered to book the room."
+    assert says_goodbye("Thanks so much, Sarah. Bye now!") and says_goodbye("Have a good one.")
+    assert not says_goodbye("No thanks, I'm just checking availability for Darek.")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome, added", [("completed", True), ("voicemail", False)])
+async def test_goodbye_added_when_model_ends_without_one(tmp_path, outcome, added):
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    speech = ScriptedSpeech(["Hello, Riverside Motel."])
+    dialog = ScriptedDialog([Turn(say="No thanks, I'm just checking.", end_call=True, outcome=outcome)])
+    manager = CallManager(cfg, db, speech, dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    manager.ari = BurstAri(server.sockets[0].getsockname()[1], [25], gaps=[75])
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    try:
+        brief = Brief(goal="Ask", callee="Motel", opening_line="Hi, I'm Alex's assistant. Is a room free?",
+                      questions={"free": "room free"})
+        call = manager.start_call("0255500000", brief)
+        await asyncio.wait_for(call.done.wait(), 60)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+    agent = [text for who, text in db.get_call(call.id)["transcript"] if who == "agent"]
+    assert (agent[-1] == "Thanks, bye!") == added, agent
