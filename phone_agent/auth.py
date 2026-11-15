@@ -51,6 +51,9 @@ class TokenAuth:
         path = scope["path"]
         if path == "/login":
             return await self._login(scope, receive, send, headers)
+        if path == "/logout":  # forget the cookie, e.g. to switch between the two tokens
+            return await _respond(send, 303, b"", [(b"location", b"/login"),
+                                                   (b"set-cookie", f"{COOKIE}=; Path=/; HttpOnly; Max-Age=0".encode())])
         presented = self._presented(headers)
         if self._valid(presented):
             scope.setdefault("state", {})["approver"] = self._approver(presented)

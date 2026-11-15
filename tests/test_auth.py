@@ -44,6 +44,16 @@ def test_browser_is_sent_to_login_and_back():
     assert c.get("/calls/abc").text == "ok"  # the cookie now works
 
 
+def test_sign_out_clears_the_cookie():
+    c = client()
+    c.post("/login", data={"token": TOKEN})
+    assert c.get("/calls/abc").status_code == 200
+    r = c.get("/logout")
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+    assert "Max-Age=0" in r.headers["set-cookie"]
+    assert c.get("/calls/abc", headers={"Accept": "text/html"}).status_code == 303  # back to the sign-in
+
+
 def test_login_never_redirects_off_site():
     r = client().post("/login?next=//evil.example/x", data={"token": TOKEN})
     assert r.headers["location"] == "/"

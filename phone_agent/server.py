@@ -24,6 +24,7 @@ from .calls import CallManager
 from .config import Config
 from .credit import SPOKEN_CREDIT, credit_line, with_credit
 from .db import Database
+from .dialing import normalize_number
 from .dialog import DEFAULT_MUST_NOT, Brief, Dialog
 from .sample import call_sample, revoiced_call_sample
 from .speech import Speech
@@ -448,6 +449,59 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         live = call["status"] in LIVE  # not while it waits: the page would reload under your finger
         return HTMLResponse(page(call["callee"] or "Call", body, refresh=live))
 
+    @mcp.custom_route("/approved", methods=["GET", "POST"])
+    async def approved_numbers(request: Request) -> Response:
+        """Numbers that dial without asking (CALL_APPROVAL=new_numbers): remove or add."""
+        esc = html.escape
+        error = ""
+        if request.method == "POST":
+            if not approver(request):
+                return HTMLResponse(page("Not allowed", "<p>Changing this list needs the approval token.</p>"),
+                                    status_code=403)
+            form = {k: v[0].strip() for k, v in parse_qs((await request.body()).decode()).items()}
+            if form.get("remove"):
+                db.remove_number(form["remove"])
+                log.info("approved number removed by the owner")
+            elif form.get("add"):
+                try:
+                    db.approve_number(normalize_number(form["add"], cfg.dial_rules), "")
+                    log.info("approved number added by the owner")
+                except ValueError as exc:
+                    error = str(exc)
+            if not error:
+                return RedirectResponse("/approved", status_code=303)
+        owner = approver(request)
+        rows = ""
+        for n in db.approved_numbers():
+            origin = f"<a href='/calls/{esc(n['call_id'])}'>call</a>" if n["call_id"] else "added here"
+            remove = (
+                "<td><form method='post' class='inline'>"
+                f"<input type='hidden' name='remove' value='{esc(n['number'])}'>"
+                "<button class='secondary'>Remove</button></form></td>"
+                if owner else ""
+            )
+            rows += (f"<tr><td class='num'>{esc(n['number'])}</td><td class='nowrap'>{when(n['added'])}</td>"
+                     f"<td>{origin}</td>{remove}</tr>")
+        fixed = ", ".join(esc(n) for n in cfg.approved_numbers)
+        mode = {
+            "new_numbers": "Calls to these numbers dial without asking. Anything else waits for approval on its page.",
+            "all": "CALL_APPROVAL=all: every call waits for approval, so this list isn't used.",
+            "off": "CALL_APPROVAL=off: calls dial without approval, so this list isn't used.",
+        }[cfg.call_approval]
+        body = (
+            "<h1>Approved numbers</h1>"
+            f"<p>{mode} Extensions never wait.</p>"
+            + (f"<p class='error'>{esc(error)}</p>" if error else "")
+            + "<div class='scroll'><table><tr><th>Number</th><th>Approved</th><th>With</th>"
+            + ("<th></th>" if owner else "") + "</tr>"
+            + (rows or f"<tr><td colspan=4 class=muted>None yet.</td></tr>") + "</table></div>"
+            + (f"<p class='muted'>Also approved in .env (APPROVED_NUMBERS): {fixed}</p>" if fixed else "")
+            + ("<form method='post'><label>Approve a number<input name='add' placeholder='+61 2 5550 1234' required>"
+               "</label><button>Add</button></form>" if owner else
+               "<p><a href='/login?next=/approved'>Sign in with the approval token</a> to change this list.</p>")
+        )
+        return HTMLResponse(page("Approved numbers", body))
+
     @mcp.custom_route("/calls/{call_id}/approve", methods=["POST"])
     async def approve_call(request: Request) -> Response:
         if not approver(request):
@@ -539,6 +593,8 @@ FAVICON = (
     "6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 "
     "0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z'/%3E%3C/svg%3E"
 )
+SIGN_OUT = False  # set by main() when the pages need a sign-in
+APPROVALS = False  # set by main() when CALL_APPROVAL isn't off
 LIVE = {"queued", "dialing", "ringing", "connected"}
 WAITING = {"awaiting_approval", "scheduled"}
 
@@ -618,6 +674,7 @@ table.answers th {{ width: 30%; text-transform: capitalize; color: var(--text); 
 .approve-note {{ background: var(--card); border-left: 4px solid var(--warn); padding: 8px 12px; }}
 label.check {{ font-weight: normal; display: flex; gap: 8px; align-items: center; }}
 label.check input {{ width: auto; margin: 0; }}
+form.inline {{ margin: 0; }}
 button.secondary {{ background: transparent; color: var(--bad); border: 1px solid var(--bad); }}
 .badge.live {{ color: var(--live); animation: pulse 1.5s infinite; }}
 @keyframes pulse {{ 50% {{ opacity: .45; }} }}
@@ -637,7 +694,7 @@ audio {{ width: 100%; }}
 footer {{ max-width: 900px; margin: 32px auto 16px; padding: 12px 16px; border-top: 1px solid var(--line);
   color: var(--muted); font-size: 13px; }}
 </style></head><body>
-<header><div><a class='brand' href='/'>{PHONE_SVG.format(size=22)} AI on the Line</a><a href='/'>Calls</a><a href='/test'>Test call</a></div></header>
+<header><div><a class='brand' href='/'>{PHONE_SVG.format(size=22)} AI on the Line</a><a href='/'>Calls</a><a href='/test'>Test call</a>{"<a href='/approved'>Approved</a>" if APPROVALS else ""}{"<a href='/logout'>Sign out</a>" if SIGN_OUT else ""}</div></header>
 <main>{body}</main>
 <footer>{CREDIT}</footer></body></html>"""
 
@@ -660,6 +717,8 @@ async def main() -> None:
     manager = CallManager(cfg, db, speech, dialog, ari)
     mcp = build_app(cfg, manager, db, speech, dialog, ari)
     log.info("call approval: %s", cfg.call_approval)
+    global APPROVALS
+    APPROVALS = cfg.call_approval != "off"
     waiting = manager.resume_pending()
     if waiting:
         log.info("%d call(s) still waiting for approval or their time", waiting)
@@ -669,6 +728,8 @@ async def main() -> None:
     preload = asyncio.create_task(dialog.preload())  # Ollama only; runs in the background
     app = mcp.streamable_http_app(host=cfg.http_host)
     if cfg.api_token or cfg.approval_token:
+        global SIGN_OUT
+        SIGN_OUT = True
         app = TokenAuth(app, cfg.api_token, cfg.approval_token)
     if not cfg.api_token:
         log.warning("API_TOKEN is not set: anyone who can reach port %s can place calls", cfg.http_port)

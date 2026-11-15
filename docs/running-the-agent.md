@@ -106,9 +106,9 @@ A person has to approve each call somewhere, because transcripts carry callers' 
 
 With `APPROVAL_TOKEN` set, `place_call` still returns at once, but a call to a number that isn't approved yet gets the status `awaiting_approval` and doesn't dial. Claude is told it can't approve it and gives you the link. The call page shows the number, the time, the opening line, the questions and what it may tell them, with Approve and Reject buttons. The call list shows a line for every call waiting.
 
-Sign in on the page with the approval token instead of the API token; it opens everything the API token does and adds the buttons. Claude's API token gets a 403 on approve, also through the web pages, so a session that has the token and a shell can't approve its own calls.
+Sign in on the page with the approval token instead of the API token; it opens everything the API token does and adds the buttons. **Sign out** in the page header switches back. Claude's API token gets a 403 on approve, also through the web pages, so a session that has the token and a shell can't approve its own calls.
 
-Approving can remember the number (`new_numbers`, the default once the token is set). Extensions and `APPROVED_NUMBERS` never wait. `CALL_APPROVAL=all` asks every time. Nothing approved within `APPROVAL_HOURS` (24) of the call being due is cancelled with outcome `expired`.
+Approving can remember the number (`new_numbers`, the default once the token is set). **Approved** in the page header lists the remembered numbers; signed in with the approval token you can remove one or add a number before any call to it. Extensions and `APPROVED_NUMBERS` never wait. `CALL_APPROVAL=all` asks every time. Nothing approved within `APPROVAL_HOURS` (24) of the call being due is cancelled with outcome `expired`.
 
 `place_call` takes `run_at`, a local time like `2026-11-20 09:30` up to 30 days ahead. The call shows as `scheduled` and dials then; approve it any time before. Calling hours are checked when it's placed and again when it dials. Waiting and scheduled calls survive a restart of the container.
 

@@ -75,6 +75,15 @@ class Database:
         self.conn.execute("INSERT OR IGNORE INTO approved_numbers VALUES (?, ?, ?)", (number, time.time(), call_id))
         self.conn.commit()
 
+    def approved_numbers(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute("SELECT * FROM approved_numbers ORDER BY added DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def remove_number(self, number: str) -> bool:
+        removed = self.conn.execute("DELETE FROM approved_numbers WHERE number = ?", (number,)).rowcount
+        self.conn.commit()
+        return bool(removed)
+
     def save_call(self, call: dict[str, Any]) -> None:
         row = {k: json.dumps(v) if k in JSON_COLUMNS else v for k, v in call.items()}
         cols = ", ".join(row)

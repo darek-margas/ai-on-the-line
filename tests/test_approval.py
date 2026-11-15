@@ -182,3 +182,27 @@ def test_only_the_approval_token_approves(tmp_path):
     assert response.status_code == 303 and call.status == "queued"
     assert manager.db.number_approved("0255500000")
     loop.close()
+
+
+def test_approved_numbers_page(tmp_path):
+    from starlette.testclient import TestClient
+
+    from phone_agent.server import build_app
+
+    manager, _ = manager_for(tmp_path, call_approval="new_numbers", approval_token="approve-me", api_token="api")
+    manager.db.approve_number("0255500000", "")
+    mcp = build_app(manager.cfg, manager, manager.db, None, None, None)
+    client = TestClient(TokenAuth(mcp.streamable_http_app(), "api", "approve-me"), follow_redirects=False)
+    as_claude = {"Authorization": "Bearer api"}
+    as_owner = {"Authorization": "Bearer approve-me"}
+
+    page = client.get("/approved", headers=as_claude)
+    assert "0255500000" in page.text and "Remove" not in page.text
+    assert client.post("/approved", headers=as_claude, data={"remove": "0255500000"}).status_code == 403
+    assert client.post("/approved", headers=as_claude, data={"add": "0255501111"}).status_code == 403
+
+    assert client.post("/approved", headers=as_owner, data={"add": "+61 2 5550 1111"}).status_code == 303
+    assert manager.db.number_approved("0255501111")  # stored as it will be dialled
+    assert client.post("/approved", headers=as_owner, data={"remove": "0255500000"}).status_code == 303
+    assert not manager.db.number_approved("0255500000")
+    assert "000" in client.post("/approved", headers=as_owner, data={"add": "000"}).text  # refused, with the reason
