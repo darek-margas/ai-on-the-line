@@ -527,6 +527,7 @@ async def main() -> None:
 
     audiosocket = await asyncio.start_server(manager.handle_audiosocket, *cfg.audiosocket_bind)
     log.info("AudioSocket listening on %s:%s", *cfg.audiosocket_bind)
+    preload = asyncio.create_task(dialog.preload())  # Ollama only; runs in the background
     app = mcp.streamable_http_app(host=cfg.http_host)
     if cfg.api_token:
         app = TokenAuth(app, cfg.api_token)

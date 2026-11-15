@@ -6,6 +6,7 @@ Each turn is one stateless LLM call returning JSON: what to say, any answers
 heard, keypad digits to press, and whether to end the call.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -349,6 +350,34 @@ class Dialog:
             timeout=600,
         )
         response.raise_for_status()
+
+    async def ollama_loaded(self) -> bool:
+        """Whether Ollama has our model in memory right now (GET /api/ps)."""
+        response = await self._http.get(f"{self.ollama_url}/api/ps", timeout=10)
+        response.raise_for_status()
+        names = {m.get("name") for m in response.json().get("models", [])} | {
+            m.get("model") for m in response.json().get("models", [])
+        }
+        return self.model in names or f"{self.model}:latest" in names
+
+    async def preload(self, retry_seconds: float = 60) -> None:
+        """At start-up, with an Ollama model: load it if it isn't loaded, so the
+        first call doesn't wait minutes for it. Keeps trying while Ollama is
+        unreachable (it may start after us). Does nothing for Claude."""
+        if self.provider != "ollama":
+            return
+        while True:
+            try:
+                if await self.ollama_loaded():
+                    log.info("Ollama model %s is already loaded", self.model)
+                else:
+                    log.info("loading Ollama model %s (keep_alive %s)", self.model, self.keep_alive)
+                    await self.warm_up()
+                    log.info("Ollama model %s loaded", self.model)
+                return
+            except Exception as e:
+                log.warning("Ollama preload failed (%s); trying again in %.0f s", e, retry_seconds)
+                await asyncio.sleep(retry_seconds)
 
     async def next_turn(
         self,

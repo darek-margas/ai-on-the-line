@@ -40,7 +40,15 @@ Names Piper says wrongly can be respelled: `TTS_PRONOUNCE=Siobhan=Shivawn,Nguyen
 
 `DIALOG_LLM=claude:<model>` needs `ANTHROPIC_API_KEY`. Haiku is the default and is quick. I run Sonnet with its thinking set to answer straight away, which follows the conversation better for about the same delay.
 
-`DIALOG_LLM=ollama:<model>` uses a local model through `OLLAMA_URL`. Replies stream either way. A smaller model is fast enough but follows the conversation less well. With gemma4 e4b I saw it ask a question that had just been answered. `check_setup` loads the model first, so the first call doesn't wait for it.
+`DIALOG_LLM=ollama:<model>` uses a local model through `OLLAMA_URL`. Replies stream either way. A smaller model is fast enough but follows the conversation less well. With gemma4 e4b I saw it ask a question that had just been answered.
+
+The model has to be in memory before a call. Loading one from disk takes from several seconds to minutes, and a caller won't wait that long. So:
+
+- The agent asks Ollama which models are loaded (`/api/ps`) when the container starts, and loads its model if it isn't there. If Ollama isn't reachable yet, it tries again every minute.
+- Every request sends `OLLAMA_KEEP_ALIVE`, `-1` by default, which keeps the model loaded indefinitely. A shorter value lets Ollama unload it between calls, and the next call starts with a long silence.
+- If the same Ollama serves something else, Home Assistant for example, use the model it already runs. Two models kept loaded forever need memory for both. If they don't fit, Ollama swaps them, and whichever is used next waits for the load.
+
+`check_setup` loads the model too and reports how long that took.
 
 Claude, on your side of MCP, only writes the brief and reads the result. The model above does the talking.
 

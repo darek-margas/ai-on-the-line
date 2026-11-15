@@ -802,3 +802,30 @@ async def test_goodbye_added_when_model_ends_without_one(tmp_path, outcome, adde
         server.close()
     agent = [text for who, text in db.get_call(call.id)["transcript"] if who == "agent"]
     assert (agent[-1] == "Thanks, bye!") == added, agent
+
+
+def test_ollama_preload_loads_only_when_needed():
+    import httpx
+
+    from phone_agent.dialog import Dialog
+
+    def run(loaded: list[str], fail_first: bool = False):
+        calls = []
+
+        def handler(request):
+            calls.append(request.url.path)
+            if fail_first and len(calls) == 1:
+                raise httpx.ConnectError("ollama not up yet")
+            if request.url.path == "/api/ps":
+                return httpx.Response(200, json={"models": [{"name": n, "model": n} for n in loaded]})
+            return httpx.Response(200, json={"done": True})
+
+        dialog = Dialog("ollama:gemma4:e4b", "Alex", "http://ollama", "-1")
+        dialog._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        asyncio.run(dialog.preload(retry_seconds=0))
+        return calls
+
+    assert run(["llama3:latest"]) == ["/api/ps", "/api/generate"]
+    assert run(["gemma4:e4b"]) == ["/api/ps"]
+    assert run([], fail_first=True) == ["/api/ps", "/api/ps", "/api/generate"]
+    assert asyncio.run(Dialog("claude:x", "Alex", "", "-1").preload()) is None  # nothing to do
