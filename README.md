@@ -78,7 +78,7 @@ You need:
 - Asterisk with a SIP trunk. I run FreePBX 17 (Asterisk 22) with an Internode trunk.
 - A Docker host that Asterisk can reach.
 - Whisper and Piper speaking the Wyoming protocol. The ones Home Assistant uses work; mine are faster-whisper large-v3-turbo on a GPU and Piper with a British English voice.
-- An Anthropic API key, or Ollama with a model that follows instructions well.
+- An Anthropic API key, or Ollama with a model that follows instructions well. Replies stream either way. I've run test calls on gemma4 e4b: fast enough, but it keeps track of the conversation less well than Claude.
 - An MCP client. Claude Code and Claude Desktop both work.
 
 Which numbers it may dial is a setting. The default is Australian mobiles, landlines, 1800 numbers and internal extensions; other countries, number types and patterns are in [docs/dialling.md](docs/dialling.md). Emergency numbers are refused whatever the settings say.

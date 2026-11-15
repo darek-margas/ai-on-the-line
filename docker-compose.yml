@@ -14,7 +14,8 @@ services:
       - "9092:9092"   # AudioSocket, reached by Asterisk
     volumes:
       - ./data:/data
-      # Optional: FreePBX recordings, to play them on the status page.
+      # Optional: FreePBX's /var/spool/asterisk/monitor (the whole folder), for the player,
+      # downloads and test samples. Set RECORDINGS_DIR=/recordings in .env.
       # - /mnt/freepbx-monitor:/recordings:ro
 
   # The agent's own Piper, so its speaking speed can differ from Home
