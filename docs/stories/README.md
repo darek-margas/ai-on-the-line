@@ -14,7 +14,7 @@ Real calls, with transcripts trimmed and personal details taken out. Each one ta
 
 The organic honey call is in the main [README](../../README.md).
 
-Recordings are published only for the screener calls, where I was the caller. The outbound calls went to real businesses, and the people who answered didn't agree to have their voices on the internet, so for those there are transcripts only.
+Recordings are published only for the screener calls, where I was the caller. The outgoing calls went to real businesses, and I'm not publishing those recordings while I look into the legal side of putting someone's voice online, so for those there are transcripts only.
 
 ---
 

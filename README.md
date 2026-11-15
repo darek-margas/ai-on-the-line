@@ -85,7 +85,7 @@ Which numbers it may dial is a setting. The default is Australian mobiles, landl
 
 To help with turn-taking, the call page exports a [test sample](docs/test-samples.md): each side's audio and a redacted transcript with timings. The same tool works on any FreePBX recording.
 
-The full setup, including the Asterisk side, is in [docs/asterisk-freepbx.md](docs/asterisk-freepbx.md). The short version:
+The full setup is in two guides: [running the agent](docs/running-the-agent.md) (image, settings, speech, ports, updates) and [the Asterisk side](docs/asterisk-freepbx.md). The short version:
 
 1. Add the dialplan contexts and an ARI user to Asterisk.
 2. Copy `.env.example` to `.env`, point it at Asterisk, Whisper and Piper, set `API_TOKEN`, and run `docker compose up -d`. The image is built by CI as `ghcr.io/darek-margas/ai-on-the-line`.
@@ -111,6 +111,10 @@ If you publish recordings made with it, a "Made with AI on the Line" line with a
 
 ## Status
 
-The repository stays private while I record better example calls.
+It has been making real calls from my home PBX for a few weeks: shops, a paddle steamer operator, a motel about a refund, and a lot of calls into its own screener. It's tested on one PBX (FreePBX 17), one trunk (Internode) and mostly one voice. Other setups will find things I haven't.
+
+Recordings of the outgoing calls aren't published while I look into the legal side of putting other people's voices online; their transcripts are in the stories. The screener recordings are me playing the caller.
+
+What helps most is [test samples](docs/test-samples.md) of calls where the timing goes wrong, and reports from other PBXes and trunks. Asterisk is the only telephony backend so far. A backend that registers straight to a SIP account is the obvious next piece.
 
 Written by Darek Margas, with Claude Code doing much of the typing.

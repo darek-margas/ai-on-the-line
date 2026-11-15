@@ -1,7 +1,9 @@
 services:
   phone-agent:
-    build: .
-    image: phone-agent:latest
+    # Published by CI. Pin a release (e.g. :2026.11.1.2) to update only when you choose.
+    image: ghcr.io/darek-margas/ai-on-the-line:latest
+    # Or build from this checkout instead: uncomment and run docker compose up -d --build
+    # build: .
     container_name: phone-agent
     restart: unless-stopped
     env_file:
