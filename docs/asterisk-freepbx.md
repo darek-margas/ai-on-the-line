@@ -84,7 +84,9 @@ Check that the module is there:
 asterisk -rx "module show like audiosocket"
 ```
 
-Recordings end up in `/var/spool/asterisk/monitor/phone-agent/`. Mount that directory into the container and set `RECORDINGS_DIR` if you want to play them on the status page.
+Recordings end up in `/var/spool/asterisk/monitor/phone-agent/`, named after the call ID. Mount that directory into the container and set `RECORDINGS_DIR` if you want to play them on the status page.
+
+FreePBX's call history (Reports → CDR) won't show them as they are: it only plays files in `monitor/YYYY/MM/DD/` whose name has the date as its fourth dash-separated part, the way its own recordings are named. The version of this context in [`asterisk/extensions_custom.conf`](../asterisk/extensions_custom.conf) handles that: it sets `CDR(recordingfile)` to a name like `agent-out-0412345678-20261115-120313-<call id>.wav`, and when the recording finishes it symlinks the file into that day's folder. The incoming-call context below does the same with `agent-in-`. I noticed this only after recording a set of test calls I wanted to keep and finding no play buttons for them.
 
 ## 5. A test receptionist
 
