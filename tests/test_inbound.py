@@ -94,6 +94,8 @@ def test_screener_uses_the_inbound_prompt():
     # No bio, no pronouns set: nothing personal to share, and "their assistant".
     assert not any(s.startswith("about Alex") for s in brief.may_share)
     assert "their assistant" in brief.opening_line and "About Alex" not in brief.context
+    assert "this call is recorded" in brief.opening_line and brief.opening_line.endswith("What's it about?")
+    assert "recorded" not in screener_brief("Alex", "", recording_notice=False).opening_line
     with_bio = screener_brief("Alex", "", bio="Alex restores old motorbikes.", pronouns="She")
     assert "about Alex: Alex restores old motorbikes." in with_bio.may_share
     assert "her assistant" in with_bio.opening_line and "About Alex: Alex restores old motorbikes." in with_bio.context

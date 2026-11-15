@@ -95,7 +95,7 @@ The full setup is in two guides: [running the agent](docs/running-the-agent.md) 
 
 ## Using it responsibly
 
-Check the law on recording calls where you live. In parts of Australia, recording a private conversation without the other side's consent is an offence, and the rules differ elsewhere. The recordings are there so you can check what was said; you don't have to keep them.
+Check the law on recording calls where you live. In parts of Australia, recording a private conversation without the other side's consent is an offence, and the rules differ elsewhere. The recordings are there so you can check what was said; you don't have to keep them. The call screener says up front that the call is recorded ("I'll pass your message on, and this call is recorded"); `SCREENER_RECORDING_NOTICE=false` turns that off if you don't record incoming calls.
 
 The agent says it's an AI when asked, and it calls on behalf of a named person. Keep it that way. Don't use it for cold calling, mass calling or anything you wouldn't do yourself on the phone. Respect calling hours and Do Not Call registers: `CALL_HOURS` blocks calls outside business hours unless you override it for a single call.
 

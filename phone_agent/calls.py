@@ -124,7 +124,8 @@ class CallManager:
         if active >= self.cfg.max_inbound_calls or call_id in self.calls:
             raise RuntimeError("busy")
         brief = PROFILES[profile](
-            self.cfg.owner_name, caller, diverted_from, bio=self.cfg.owner_bio, pronouns=self.cfg.owner_pronouns
+            self.cfg.owner_name, caller, diverted_from, bio=self.cfg.owner_bio, pronouns=self.cfg.owner_pronouns,
+            recording_notice=self.cfg.screener_recording_notice,
         )
         call = CallState(id=call_id, phone=caller or "withheld", brief=brief, owner=self.cfg.owner_name, db=self.db)
         call.status = "ringing"

@@ -17,6 +17,7 @@ To build from your own checkout instead, uncomment `build: .` in the compose fil
 Everything is in `.env`; [.env.example](../.env.example) lists every setting with a comment. The ones that matter first:
 
 - `OWNER_NAME`, `OWNER_PRONOUNS`: who the agent speaks for. It always introduces itself as that person's assistant.
+- `SCREENER_RECORDING_NOTICE`: on by default. The screener's greeting tells callers the call is recorded, which many places require.
 - `OWNER_BIO`: optional. What the call screener may say about you. Leave it empty and it won't make small talk about you.
 - `TIMEZONE` and `CALL_HOURS`: outside numbers are only called within these hours, in this timezone. A single call can override it; extensions are always allowed.
 - `ARI_*`, `AMI_*`, `AUDIOSOCKET_ADVERTISE`, `DIAL_ENDPOINT`: the Asterisk connection, see the FreePBX guide.

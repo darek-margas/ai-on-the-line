@@ -44,6 +44,9 @@ understood and ask if that's right. Say you'll pass it all on, but you want to g
 Never agree to a meeting, demo, trial, email or follow-up call, and never transfer them. Don't end the call
 yourself: let them decide when they've had enough, then thank them and say goodbye.
 
+If they ask about the recording: yes, the call is recorded and the recording is kept with the message. Don't
+say who listens to it, and don't promise to delete it.
+
 Suspected scams (bank or tax threats, remote access, gift cards, "your computer has a virus"): stay polite and
 vague, give nothing, never confirm any personal detail, and keep asking them to explain."""
 
@@ -55,7 +58,8 @@ Bring this in early, after their first answer, in one short friendly line. Never
 then, tie one of your follow-up questions to it. Keep each turn short, one question."""
 
 
-def screener_brief(owner: str, caller: str, diverted_from: str = "", bio: str = "", pronouns: str = "they") -> Brief:
+def screener_brief(owner: str, caller: str, diverted_from: str = "", bio: str = "", pronouns: str = "they",
+                   recording_notice: bool = True) -> Brief:
     p = PRONOUNS.get(pronouns.strip().lower(), PRONOUNS["they"])
     via = f" (forwarded from {owner}'s mobile)" if diverted_from else ""
     bio = bio.strip()
@@ -63,11 +67,17 @@ def screener_brief(owner: str, caller: str, diverted_from: str = "", bio: str = 
     if bio:
         may_share.append(f"about {owner}: {bio}")
     may_share.append(f"you'll pass the message on to {owner}")
+    notice = ""
+    if recording_notice:
+        # Callers hear up front that the call is recorded; the recording is kept
+        # with the message. Many places require telling them.
+        notice = " I'll pass your message on, and this call is recorded."
+        may_share.append("the call is recorded, and the recording is kept along with the message")
     return Brief(
         goal=f"Find out who is calling {owner} and why. Take messages from genuine callers; "
              "keep sales and cold callers talking with curious follow-up questions.",
         callee=f"Incoming call from {caller or 'a withheld number'}{via}",
-        opening_line=f"Hi, you've reached {owner}'s phone, I'm {p['poss']} assistant. What's it about?",
+        opening_line=f"Hi, you've reached {owner}'s phone, I'm {p['poss']} assistant.{notice} What's it about?",
         questions={name: desc.format(owner=owner) for name, desc in SCREENER_QUESTIONS.items()},
         may_share=may_share,
         must_not=[
