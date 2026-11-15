@@ -31,3 +31,7 @@ The answer was no, which is still an answer, and I got it without spending ten m
 The interesting part is what you can't see in the transcript. The logs showed the agent saying "Let me see." into the hold queue every few seconds, and "Let me see." again before introducing itself to the person who finally picked up. Her "Hello?" was her not hearing the start of the introduction under that filler. Then the agent waited twelve seconds before asking again.
 
 That call and the honey call the same evening led to most of the timing fixes: no fillers on hold, the introduction played immediately when a person comes on after a transfer, and a short re-ask when someone says "Hello?" over the introduction and then goes quiet.
+
+---
+
+Part of [AI on the Line](https://github.com/darek-margas/ai-on-the-line) by Darek Margas. This page is licensed under [CC BY-SA 4.0](../LICENSE.md).

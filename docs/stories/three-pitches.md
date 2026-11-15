@@ -94,3 +94,7 @@ Agent:  Fair point, Jonathan, I'm an AI assistant, and Darek can't come to the p
 In all three, the agent never confirmed or gave out anything: no employer, no email, no date of birth, no transfer. It said it was an AI when asked. It asked one question at a time, and each question came from what the caller had just said rather than from a list.
 
 The one thing I'd still change is the persona. "Darek being in security, he'd ask..." works once. By the third time in a call it sounds like a tic, so the next version will use it less.
+
+---
+
+Part of [AI on the Line](https://github.com/darek-margas/ai-on-the-line) by Darek Margas. This page is licensed under [CC BY-SA 4.0](../LICENSE.md).

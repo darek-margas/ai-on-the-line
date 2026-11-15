@@ -38,3 +38,7 @@ The fixes, in the order I made them:
 - If the person starts talking again before the agent's reply has started playing, that reply is dropped, and one reply covers everything they said.
 
 None of this shows in the transcript, which reads like a normal, polite call. The problems were all in the timing, and I only found them by putting the agent's log timestamps next to the recording.
+
+---
+
+Part of [AI on the Line](https://github.com/darek-margas/ai-on-the-line) by Darek Margas. This page is licensed under [CC BY-SA 4.0](../LICENSE.md).

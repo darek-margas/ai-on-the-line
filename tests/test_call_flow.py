@@ -684,5 +684,5 @@ def test_pages_carry_the_credit_and_source_link():
     from phone_agent import server
 
     html = server.page("Calls", "<p>x</p>")
-    assert "ai-on-the-line</a> by Darek Margas" in html and "source</a> (AGPL-3.0)" in html
+    assert "AI on the Line</a> by Darek Margas" in html and "source</a> (AGPL-3.0)" in html
     assert "Jenny (Dioco)" in html

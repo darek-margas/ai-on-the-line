@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 # where its source is (AGPL section 13).
 SOURCE_URL = os.environ.get("SOURCE_URL", "https://github.com/darek-margas/ai-on-the-line")
 CREDIT = (
-    "<a href='https://github.com/darek-margas/ai-on-the-line'>ai-on-the-line</a> by Darek Margas"
+    "<a href='https://github.com/darek-margas/ai-on-the-line'>AI on the Line</a> by Darek Margas"
     f" &middot; <a href='{html.escape(SOURCE_URL, quote=True)}'>source</a> (AGPL-3.0)"
     " &middot; default voice: Jenny (Dioco)"
 )
@@ -104,7 +104,7 @@ def summarize(call: dict, base_url: str) -> dict:
 
 
 def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, dialog: Dialog, ari: Ari) -> MCPServer:
-    mcp = MCPServer("phone-agent", instructions=INSTRUCTIONS)
+    mcp = MCPServer("ai-on-the-line", instructions=INSTRUCTIONS)
     base_url = os.environ.get("PUBLIC_URL", f"http://localhost:{cfg.http_port}").rstrip("/")
 
     @mcp.tool()
@@ -272,7 +272,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             f"{rows or '<tr><td colspan=5 class=muted>No calls yet.</td></tr>'}</table></div>"
             f"<p class='muted'>Times are {html.escape(cfg.timezone)}.</p>"
         )
-        return HTMLResponse(page("Phone agent", body, refresh=True))
+        return HTMLResponse(page("AI on the Line", body, refresh=True))
 
     @mcp.custom_route("/test", methods=["GET", "POST"])
     async def test_call(request: Request) -> Response:
@@ -457,7 +457,7 @@ audio {{ width: 100%; }}
 footer {{ max-width: 900px; margin: 32px auto 16px; padding: 12px 16px; border-top: 1px solid var(--line);
   color: var(--muted); font-size: 13px; }}
 </style></head><body>
-<header><div><a class='brand' href='/'>{PHONE_SVG.format(size=22)} ai-on-the-line</a><a href='/'>Calls</a><a href='/test'>Test call</a></div></header>
+<header><div><a class='brand' href='/'>{PHONE_SVG.format(size=22)} AI on the Line</a><a href='/'>Calls</a><a href='/test'>Test call</a></div></header>
 <main>{body}</main>
 <footer>{CREDIT}</footer></body></html>"""
 

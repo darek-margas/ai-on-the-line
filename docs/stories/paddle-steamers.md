@@ -28,3 +28,7 @@ Whisper mangled the greeting into something that sounded like a doctor's name, a
 The useful part is boats B and C. The brief asked which boats would run and whether any were out of service. When the answer was one boat, the agent asked about the other two by name and got something no web page had: one boat sold, one in survey.
 
 Claude's report said what was known and what wasn't: days of operation (subject to change), closed 25, 26 December and 1 January, only one boat running, book online. Departure times stayed unknown, because the answer to that question was "they could change".
+
+---
+
+Part of [AI on the Line](https://github.com/darek-margas/ai-on-the-line) by Darek Margas. This page is licensed under [CC BY-SA 4.0](../LICENSE.md).

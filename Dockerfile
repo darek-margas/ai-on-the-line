@@ -7,6 +7,8 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY phone_agent ./phone_agent
+# The licence and the attribution term travel with every copy of the image.
+COPY LICENSE NOTICE ./
 
 # Run as an ordinary user. /data is where calls and recordings are kept.
 RUN useradd --system --uid 10001 --home /app agent && mkdir -p /data && chown agent /data

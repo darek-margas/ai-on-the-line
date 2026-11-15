@@ -233,3 +233,7 @@ If keypresses don't work, check the AMI user's `permit` line and that `webenable
 Calling your own trunk number from the PBX returns `486 Busy` on Internode rather than ringing back in. Test inbound from a mobile.
 
 To see SIP headers such as Diversion, `asterisk -rx "pjsip set logger on"`, make a call, read `/var/log/asterisk/full`, and turn it off again: it logs every caller's number.
+
+---
+
+Part of [AI on the Line](https://github.com/darek-margas/ai-on-the-line) by Darek Margas. This page is licensed under [CC BY-SA 4.0](LICENSE.md).

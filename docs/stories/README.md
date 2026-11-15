@@ -15,3 +15,7 @@ Real calls, with transcripts trimmed and personal details taken out. Each one ta
 The organic honey call is in the main [README](../../README.md).
 
 Recordings are published only for the screener calls, where I was the caller. The outbound calls went to real businesses, and the people who answered didn't agree to have their voices on the internet, so for those there are transcripts only.
+
+---
+
+Part of [AI on the Line](https://github.com/darek-margas/ai-on-the-line) by Darek Margas. This page is licensed under [CC BY-SA 4.0](../LICENSE.md).
