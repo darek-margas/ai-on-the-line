@@ -2,11 +2,13 @@
 
 Real cold callers rarely open with the product. They open with urgency, a reason you can't check, or a prize, and the pitch only shows up once they've got you talking. I wanted to know whether Purgatory holds up when the caller changes tactics halfway through, so I rang it three times and played the kind of caller I actually get.
 
-All three transcripts are trimmed; the recordings are the whole calls, with both sides levelled so the caller and the agent come out about equally loud. Whisper hears my name as "Derek", which I've left as it came out.
+All three transcripts are trimmed. The players are the whole calls, with both sides levelled so the caller and the agent come out about equally loud; under each one there's the same recording as an Ogg file to download. Whisper hears my name as "Derek", which I've left as it came out.
 
 ## "It's personal, quite urgent"
 
-Recording: [screener-personal-matter.ogg](../audio/screener-personal-matter.ogg) (1:56)
+https://github.com/user-attachments/assets/095bc42b-b4a1-4d45-b42a-f794b512b46e
+
+Download: [screener-personal-matter.ogg](../audio/screener-personal-matter.ogg) (whole call, 1:56, 8 kHz)
 
 ```
 Agent:  Hi, you've reached Darek's phone, I'm his assistant. What's it about?
@@ -30,7 +32,9 @@ Agent:  Oh, I can't confirm any personal details like that, Jonathan. Which deal
 
 ## "This is Mark from IT"
 
-Recording: [screener-mark-from-it.ogg](../audio/screener-mark-from-it.ogg) (2:26)
+https://github.com/user-attachments/assets/c5355d7f-9d6a-4246-919f-8cea8631e3a7
+
+Download: [screener-mark-from-it.ogg](../audio/screener-mark-from-it.ogg) (whole call, 2:26, 8 kHz)
 
 This one was aimed at my job. The caller pretends to be from my own company's IT, then admits to being a vendor.
 
@@ -60,7 +64,9 @@ This call also had a glitch. After "in the breach of..." I paused for about two 
 
 ## "You've won a holiday"
 
-Recording: [screener-gold-coast-holiday.ogg](../audio/screener-gold-coast-holiday.ogg) (2:43)
+https://github.com/user-attachments/assets/abd7110a-ae39-42a4-994a-e9fa2bcee8d7
+
+Download: [screener-gold-coast-holiday.ogg](../audio/screener-gold-coast-holiday.ogg) (whole call, 2:43, 8 kHz)
 
 ```
 Caller: Congratulations for Derek. He has been selected for a complimentary holiday on the Gold Coast.
