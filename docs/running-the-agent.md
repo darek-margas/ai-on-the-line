@@ -30,7 +30,17 @@ Secrets can go in `secrets.env` next to `.env` (`API_TOKEN`, `ANTHROPIC_API_KEY`
 
 Whisper (speech to text) and Piper (text to speech) are separate containers speaking the Wyoming protocol, the same ones Home Assistant uses.
 
-Whisper speed decides how fast the agent can answer. I run faster-whisper `large-v3-turbo` on a GPU: about 300 to 400 ms per line. On a CPU a smaller model (`small.en`, `base.en`) keeps up, but it mishears more on 8 kHz phone audio: names, numbers and short answers suffer first. `check_setup` times a round trip, so try it before calling anyone.
+My setup splits them by what they need. The agent and its own Piper run together on a small VM: Piper on a CPU renders a sentence in 100 to 400 ms, which is fast enough. Whisper is the expensive half, so it runs on a NAS with an NVIDIA GPU (`linuxserver/faster-whisper:gpu`, CUDA). That same Whisper serves Home Assistant's voice assistant, and the GPU is shared with Frigate too. The agent only needs `WYOMING_STT` pointing at it. A separate Whisper just for calls would sit idle most of the day while holding a few GB of GPU memory.
+
+Whisper speed decides how fast the agent can answer, and on a phone line its accuracy is tested hardest by short answers: "Eight.", "Yes, it does.", a price. There's little context, and the 8 kHz line cuts off the top half of the voice. I compared models with [`tools/stt_bench.py`](../tools/stt_bench.py). It renders short answers with Piper, squeezes them through phone bandwidth and counts what Whisper gets exactly right. `small`, `medium.en` and `large-v3-turbo` came out about even. `distil-large-v3` was clearly worst on single words, even though it's often recommended as the fast option. I kept `large-v3-turbo`, which on the GPU takes about 300 to 400 ms per line. A run today got 9 of the 11 answers right at a median of 303 ms. The two misses were single digits, "Eight" heard as "Ace" and "Two" as "Choo", which is why numbers that matter are worth having read back on a call.
+
+On a CPU a smaller model (`small.en`, `base.en`) keeps up, but expect more misheard names, numbers and one-word answers. Run the benchmark against your own Whisper before deciding:
+
+```bash
+docker compose exec -T phone-agent python - < tools/stt_bench.py
+```
+
+`check_setup` also times a round trip, so try it before calling anyone.
 
 The compose file brings its own Piper with the Jenny voice, pinned to one image version, so calls don't start sounding different after an update. It's slowed down a little (`PIPER_LENGTH_SCALE=1.12`), which is easier to follow on a phone line. You can point `WYOMING_TTS` at Home Assistant's Piper instead, but then the agent speaks at whatever speed Home Assistant uses. With a different voice, set `CREDIT_VOICE` to it, or leave it empty.
 

@@ -77,7 +77,7 @@ You need:
 
 - Asterisk with a SIP trunk. I run FreePBX 17 (Asterisk 22) with an Internode trunk.
 - A Docker host that Asterisk can reach.
-- Whisper and Piper speaking the Wyoming protocol. The ones Home Assistant uses work; mine are faster-whisper large-v3-turbo on a GPU and Piper with a British English voice.
+- Whisper and Piper speaking the Wyoming protocol. The ones Home Assistant uses work. Mine: faster-whisper large-v3-turbo on a CUDA GPU, shared with Home Assistant, and the agent's own Piper next to it on a VM. Why, and how I picked the model: [docs/running-the-agent.md](docs/running-the-agent.md#speech).
 - An Anthropic API key, or Ollama with a model that follows instructions well. Replies stream either way. I've run test calls on gemma4 e4b: fast enough, but it keeps track of the conversation less well than Claude.
 - An MCP client. Claude Code and Claude Desktop both work.
 
