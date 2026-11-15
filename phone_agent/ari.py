@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Minimal Asterisk REST Interface client: originate, keypad tones, hang up."""
 
 import httpx

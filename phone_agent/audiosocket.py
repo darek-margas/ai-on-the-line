@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Asterisk AudioSocket wire protocol.
 
 Each message is: 1 byte kind, 2 bytes big-endian payload length, payload.

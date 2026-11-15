@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Places a test call to the scripted receptionist (extension 7999) through the MCP API
 and prints the answers and transcript. Run inside the container:
 

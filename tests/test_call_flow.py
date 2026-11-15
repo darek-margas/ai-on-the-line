@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """End-to-end call flow with fake Asterisk, speech and LLM (no network, no PBX)."""
 
 import asyncio
@@ -675,3 +677,12 @@ async def test_cancelled_queued_call_never_dials(tmp_path):
     assert await manager.hang_up(call.id)
     await asyncio.wait_for(call.done.wait(), 10)
     assert dialled == [] and call.outcome == "hung_up_by_owner"
+
+
+def test_pages_carry_the_credit_and_source_link():
+    """The NOTICE's additional term (AGPL 7(b)): the credit stays in every page's footer."""
+    from phone_agent import server
+
+    html = server.page("Calls", "<p>x</p>")
+    assert "ai-on-the-line</a> by Darek Margas" in html and "source</a> (AGPL-3.0)" in html
+    assert "Jenny (Dioco)" in html

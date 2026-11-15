@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Asterisk Manager Interface over HTTP, only for pressing keys.
 
 Phone menus often ignore in-band tones and want real DTMF (RFC 2833), which

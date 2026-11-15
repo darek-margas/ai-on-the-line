@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Cuts the callee's audio into utterances using WebRTC VAD."""
 
 from collections import deque

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """The in-call brain: given the brief and what's been said, decide the next move.
 
 Each turn is one stateless LLM call returning JSON: what to say, any answers

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Incoming calls: the PBX registers the call, then connects its AudioSocket."""
 
 import asyncio

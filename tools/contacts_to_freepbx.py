@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Turn an exported vCard file (e.g. iPhone: Contacts > Lists > long-press a list >
 Export) into contacts for FreePBX's Contact Manager, which the PBX checks before
 screening a forwarded call.

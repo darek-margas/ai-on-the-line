@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Answering calls: standing briefs for calls the PBX hands to the agent.
 
 The dialplan registers each incoming call (POST /inbound) before opening the

@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 # Runs when an agent call's recording ends (MixMonitor's post-command).
 #   agent-recording-finish <call id> <day folder> <FreePBX file name>
 #

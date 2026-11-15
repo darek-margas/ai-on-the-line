@@ -97,8 +97,18 @@ Check the law on recording calls where you live. In parts of Australia, recordin
 
 The agent says it's an AI when asked, and it calls on behalf of a named person. Keep it that way. Don't use it for cold calling, mass calling or anything you wouldn't do yourself on the phone. Respect calling hours and Do Not Call registers: `CALL_HOURS` blocks calls outside business hours unless you override it for a single call.
 
+## Licence and credits
+
+The code is under the [GNU Affero General Public License v3.0 or later](LICENSE). You can use it, change it, sell it and run it for others. If you hand it on or run a changed version as a service, the changes have to be published under the same licence. One extra term, allowed by the AGPL and written out in [NOTICE](NOTICE): the "ai-on-the-line by Darek Margas" credit and the source link in the web pages' footer stay in every copy.
+
+The docs, stories, screenshots and recordings are under [CC BY-SA 4.0](docs/LICENSE.md).
+
+The agent's default voice is Jenny (Dioco), a Piper voice trained on the [Jenny TTS dataset](https://github.com/dioco-group/jenny-tts-dataset). Its terms ask software that uses it to credit the voice, which the footer does; a [copy of those terms](docs/third-party/jenny-tts-dataset-README.md) is kept here.
+
+If you publish recordings made with it, a "Made with ai-on-the-line" line with a link would be appreciated. It's a request, not a condition.
+
 ## Status
 
-The code, the container build and the docs are all here. The repository stays private while I record better example calls and settle the licence.
+The repository stays private while I record better example calls.
 
 Written by Darek Margas, with Claude Code doing much of the typing.

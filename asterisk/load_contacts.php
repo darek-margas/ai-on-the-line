@@ -1,4 +1,6 @@
 <?php
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Darek Margas. See NOTICE.
 // Load contacts into a FreePBX Contact Manager group (shared, "external"), replacing
 // whatever the group held. Reads the JSON from tools/contacts_to_freepbx.py on stdin:
 //

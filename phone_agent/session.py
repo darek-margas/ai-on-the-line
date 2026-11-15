@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """One live conversation over an AudioSocket connection.
 
 Three things run at once: a reader that feeds the callee's audio through VAD,

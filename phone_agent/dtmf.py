@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Keypad tones (DTMF) generated as audio, like a phone pressing keys.
 
 ARI can only send DTMF to channels it controls, so the agent plays the

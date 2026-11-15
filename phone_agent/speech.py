@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """Speech-to-text and text-to-speech through Wyoming (faster-whisper and Piper containers)."""
 
 import re

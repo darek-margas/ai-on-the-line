@@ -1,0 +1,48 @@
+ai-on-the-line
+Copyright (C) 2026 Darek Margas
+https://github.com/darek-margas/ai-on-the-line
+
+The software in this repository is licensed under the GNU Affero General
+Public License, version 3 or (at your option) any later version (see
+LICENSE), with the additional term below.
+
+Additional term under section 7(b) of the AGPL
+----------------------------------------------
+
+You must preserve the following author attribution in the Appropriate Legal
+Notices displayed by any covered work, and in particular in the footer of the
+web interface (the status pages served on the HTTP port), in every copy and
+every version you run for others over a network, modified or not:
+
+    ai-on-the-line by Darek Margas
+    https://github.com/darek-margas/ai-on-the-line
+
+If you run a modified version for others, the same footer must also link to
+the source of your version, as section 13 of the AGPL requires.
+
+Documentation and media
+-----------------------
+
+Everything under docs/ (guides, stories, screenshots and the call recordings
+in docs/audio) is licensed under Creative Commons Attribution-ShareAlike 4.0
+International (CC BY-SA 4.0): https://creativecommons.org/licenses/by-sa/4.0/
+Credit it as "ai-on-the-line by Darek Margas" with a link to the repository.
+docs/third-party/ holds copies of other people's terms and is not covered.
+
+Third-party voice
+-----------------
+
+The agent's default voice is "Jenny (Dioco)", the Piper voice
+en_GB-jenny_dioco-medium trained on the Jenny TTS dataset by Dioco
+(https://github.com/dioco-group/jenny-tts-dataset). Its licence requires
+software and voice interfaces that use it to credit the voice as "Jenny" and,
+where practical, "Jenny (Dioco)"; commercial use is permitted. The voice is
+downloaded by Piper at run time and is not part of this repository. A copy of
+the dataset's terms as relied on is in docs/third-party/.
+
+Credits in recordings
+---------------------
+
+Not required, but appreciated: if you publish audio or video made with this
+project, please credit "Made with ai-on-the-line" with a link to the
+repository, and "Voice: Jenny (Dioco)" if you used that voice.

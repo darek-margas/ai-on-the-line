@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Darek Margas. See NOTICE.
 """MCP server (tools for Claude) plus a small status page, and the AudioSocket listener."""
 
 import asyncio
@@ -25,6 +27,16 @@ from .dialog import DEFAULT_MUST_NOT, Brief, Dialog
 from .speech import Speech
 
 log = logging.getLogger(__name__)
+
+# Required by the additional term in NOTICE (AGPL section 7(b)): keep this credit
+# in the footer. If you run a modified version for others, set SOURCE_URL to
+# where its source is (AGPL section 13).
+SOURCE_URL = os.environ.get("SOURCE_URL", "https://github.com/darek-margas/ai-on-the-line")
+CREDIT = (
+    "<a href='https://github.com/darek-margas/ai-on-the-line'>ai-on-the-line</a> by Darek Margas"
+    f" &middot; <a href='{html.escape(SOURCE_URL, quote=True)}'>source</a> (AGPL-3.0)"
+    " &middot; default voice: Jenny (Dioco)"
+)
 
 INSTRUCTIONS = """\
 Places real outbound phone calls. A voice agent holds the conversation from a brief you write, \
@@ -442,9 +454,12 @@ input, textarea {{ display: block; width: 100%; margin-top: 4px; padding: 8px; f
 button {{ padding: 10px 24px; font: inherit; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff;
   border: 0; border-radius: 6px; }}
 audio {{ width: 100%; }}
+footer {{ max-width: 900px; margin: 32px auto 16px; padding: 12px 16px; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 13px; }}
 </style></head><body>
-<header><div><a class='brand' href='/'>{PHONE_SVG.format(size=22)} Phone agent</a><a href='/'>Calls</a><a href='/test'>Test call</a></div></header>
-<main>{body}</main></body></html>"""
+<header><div><a class='brand' href='/'>{PHONE_SVG.format(size=22)} ai-on-the-line</a><a href='/'>Calls</a><a href='/test'>Test call</a></div></header>
+<main>{body}</main>
+<footer>{CREDIT}</footer></body></html>"""
 
 
 async def main() -> None:
