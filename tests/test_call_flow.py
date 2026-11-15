@@ -325,13 +325,16 @@ def test_contacts_from_vcard():
     assert [e["displayname"] for e in c2f.contacts(vcf, ["anna smith", "+61 2 5550 5466"])] == ["LongName"]
 
 
-def test_laughs_become_hey():
+def test_laughs_are_dropped():
     from phone_agent.dialog import soften_laughs
 
-    assert soften_laughs("Ha, honest, I like that! What kind of product is it?") == "Hey, honest, I like that! What kind of product is it?"
-    assert soften_laughs("Haha! Bold claim.") == "Hey! Bold claim."
-    assert soften_laughs("Ha ha, fair enough.") == "Hey, fair enough."
-    assert soften_laughs("Got it. Ha, the President himself!") == "Got it. Hey, the President himself!"
+    assert soften_laughs("Ha, honest, I like that! What kind of product is it?") == "Honest, I like that! What kind of product is it?"
+    assert soften_laughs("Haha! Bold claim.") == "Bold claim."
+    assert soften_laughs("Ha ha, fair enough.") == "Fair enough."
+    assert soften_laughs("Got it. Ha, the President himself!") == "Got it. The President himself!"
+    assert soften_laughs("Ha ha!") == "" and soften_laughs("Ha") == ""  # nothing left to say
+    assert soften_laughs("Hal will call you.") == "Hal will call you."
+    assert soften_laughs("It's at 3 p.m. today.") == "It's at 3 p.m. today."
     assert soften_laughs("That's half the price, ha.") == "That's half the price."
     assert soften_laughs("The Hague office has a hall.") == "The Hague office has a hall."
 
@@ -486,8 +489,8 @@ def test_dialog_streams_say_from_claude():
 
     brief = Brief(goal="g", callee="c", opening_line="Hi.", questions={"q": "q?"})
     turn = asyncio.run(dialog.next_turn(brief, [], {}, "event", on_sentence=on_sentence))
-    assert heard == ["Hey, great!", "Which brands?"]  # laughs softened per sentence
-    assert turn.spoken and turn.say == "Hey, great! Which brands?" and turn.answers == {"q": "yes"}
+    assert heard == ["Great!", "Which brands?"]  # laughs dropped per sentence
+    assert turn.spoken and turn.say == "Great! Which brands?" and turn.answers == {"q": "yes"}
 
 
 class StreamingDialog(FakeDialog):

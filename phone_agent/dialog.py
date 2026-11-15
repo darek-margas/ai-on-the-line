@@ -87,7 +87,7 @@ How to speak:
 - Sound like a friendly, relaxed person answering the phone, not a script. Keep every turn short: under 20 words, a few words of reaction plus exactly ONE question, then stop and let them talk. Never ask for two things in one turn: not "Who am I speaking with, and what's it about?" but just "Who am I speaking with?", and the other next turn. No lists, no markdown, no emoji.
 - Right after you ask for their name, a short reply is almost always the name, often garbled: "I'm done" may be "I'm Don", "I'm good" may be "I'm Gord". Check your best guess ("Sorry, was that Don?") rather than treating it as leaving.
 - A quick "Let me think" or "Let me see" is sometimes played automatically while you think, so don't start your reply with those words.
-- React to what they said and vary the reaction every turn ("Oh, interesting", "Fair enough", "Wow", "Got it", "Nice", "Hmm, clever", "Hey, I like that", or none at all). Never write a laugh ("Ha", "Haha"): it sounds odd in text-to-speech. Never repeat a question you've just asked.
+- React to what they said and vary the reaction every turn ("Oh, interesting", "Fair enough", "Wow", "Got it", "Nice", "Hmm, clever", "I like that", or none at all). Never write a laugh ("Ha", "Haha"): it sounds odd in text-to-speech. Never repeat a question you've just asked.
 - Speech recognition garbles words and sometimes invents one- or two-word scraps from noise ("you", "thank you"). Ignore only scraps like that; anything longer is the caller talking, even if garbled.
 - Background audio (TV, radio, other people) isn't the caller: ignore it silently, never mention it.
 - If they ask how you are, answer warmly and briefly, then carry on.
@@ -218,15 +218,19 @@ NON_ANSWER = re.compile(
 
 
 LAUGH = r"(?:ha){1,3}(?:[\s-]+(?:ha){1,3})*"
-OPENING_LAUGH = re.compile(rf"(^|[.!?]\s+){LAUGH}\b(?=\s*[,!.]|\s+\w)", re.I)
+OPENING_LAUGH = re.compile(rf"(^|[.!?]\s+){LAUGH}\b(?:\s*[,!.]+\s*|\s+(?=\w)|\s*$)", re.I)
 TRAILING_LAUGH = re.compile(rf",?\s+{LAUGH}\b(?=\s*[.!?]|\s*$)", re.I)
 
 
 def soften_laughs(text: str) -> str:
-    """'Ha, honest, I like that!' -> 'Hey, honest, I like that!': Piper's 'Ha'
-    sounds like a bark on the phone, whatever the prompt asks. A laugh opening a
-    sentence becomes 'Hey'; one tacked on at the end is dropped."""
-    return TRAILING_LAUGH.sub("", OPENING_LAUGH.sub(r"\1Hey", text))
+    """'Ha, honest, I like that!' -> 'Honest, I like that!': Piper's 'Ha' sounds
+    like a bark on the phone, whatever the prompt asks. Laughs are dropped, at
+    the start of a sentence or tacked on at the end. (They used to become
+    'Hey', which turned into a tic on calls where the model laughs a lot.)"""
+    text = TRAILING_LAUGH.sub("", OPENING_LAUGH.sub("\\1\0", text))
+    # Where a laugh opened a sentence, what follows now does: capitalise it.
+    text = re.sub("\0+([a-z]?)", lambda m: m.group(1).upper(), text)
+    return text.strip()
 
 
 class SayStream:

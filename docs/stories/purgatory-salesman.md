@@ -37,7 +37,7 @@ What I like is the door question. Nothing in its instructions mentions doors. It
 
 A second test went the same way. "John" from "Security Bullshit Business Australia" offered a 90% discount on a product that makes you "secure as no one else". When the agent asked whether it covered phishing, he promised I wouldn't get crabs. The agent wrote "no specifics given" in its notes, which is the right summary.
 
-Things these calls changed: the agent used to start replies with "Ha", which Piper turns into a bark, so it now says "Hey". It used to ask two questions in one turn, which gives a salesman an easy way to answer only the convenient one. And it once ended a call because I said "I'm done" when I meant "I'm Don", so short replies after "who am I speaking with?" are now checked as possible names.
+Things these calls changed: the agent used to start replies with "Ha", which Piper turns into a bark. At first that became "Hey"; on a later test call three replies in a row opened with "Hey", so now the laugh is simply dropped. It used to ask two questions in one turn, which gives a salesman an easy way to answer only the convenient one. And it once ended a call because I said "I'm done" when I meant "I'm Don", so short replies after "who am I speaking with?" are now checked as possible names.
 
 ---
 
