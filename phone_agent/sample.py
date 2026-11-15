@@ -117,6 +117,10 @@ def call_sample(call: dict, owner: str, recordings_dir: str = "") -> bytes:
             "who": "agent" if who == "agent" else ("caller" if inbound else "callee"),
             "text": redact(text, names),
         })
+    # A callee line is stamped when they started speaking, so it can come before
+    # an agent line that was logged earlier.
+    if all(line["t"] is not None for line in lines):
+        lines.sort(key=lambda line: line["t"])
     files = {}
     if recordings_dir and call.get("recording"):
         base = os.path.join(recordings_dir, call["recording"])[: -len(".wav")]
