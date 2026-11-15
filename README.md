@@ -77,7 +77,7 @@ You need:
 
 - Asterisk with a SIP trunk. I run FreePBX 17 (Asterisk 22) with an Internode trunk.
 - A Docker host that Asterisk can reach.
-- Whisper and Piper speaking the Wyoming protocol. The ones Home Assistant uses work. Mine: faster-whisper large-v3-turbo on a CUDA GPU, shared with Home Assistant, and the agent's own Piper next to it on a VM. Why, and how I picked the model: [docs/running-the-agent.md](docs/running-the-agent.md#speech).
+- Whisper and Piper speaking the Wyoming protocol. The ones Home Assistant uses work. Mine: faster-whisper large-v3-turbo on a CUDA GPU, shared with Home Assistant, and the agent's own Piper next to the agent on a VM. Why, and how I picked the model: [docs/running-the-agent.md](docs/running-the-agent.md#speech).
 - An Anthropic API key, or Ollama with a model that follows instructions well. Replies stream either way. I've run test calls on gemma4 e4b: fast enough, but it keeps track of the conversation less well than Claude.
 - An MCP client. Claude Code and Claude Desktop both work.
 
@@ -85,7 +85,7 @@ Which numbers it may dial is a setting. The default is Australian mobiles, landl
 
 To help with turn-taking, the call page exports a [test sample](docs/test-samples.md): each side's audio and a redacted transcript with timings. The re-voiced version replaces every voice with the TTS voice at the same timing, so it can be shared without putting anyone's voice online. The same tool works on any FreePBX recording.
 
-The full setup is in two guides: [running the agent](docs/running-the-agent.md) (image, settings, speech, ports, updates) and [the Asterisk side](docs/asterisk-freepbx.md). The short version:
+The full setup is in two guides: [running the agent](docs/running-the-agent.md) (image, settings, speech, ports, the web pages and downloads, updates) and [the Asterisk side](docs/asterisk-freepbx.md). The short version:
 
 1. Add the dialplan contexts and an ARI user to Asterisk.
 2. Copy `.env.example` to `.env`, point it at Asterisk, Whisper and Piper, set `API_TOKEN`, and run `docker compose up -d`. The image is built by CI as `ghcr.io/darek-margas/ai-on-the-line`.

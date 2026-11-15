@@ -99,6 +99,22 @@ Then ask it to run `check_setup`, and to call the test receptionist on 7999.
 
 The tools are `place_call`, `get_call`, `list_calls`, `hang_up` and `check_setup`. Calls take minutes, so Claude places a call and then polls `get_call`. The MCP server's own instructions tell it how to write a brief and report back, so a plain request like "ring these three motels and ask about a family room on the 12th" works.
 
+## The web pages
+
+Port 8090 also serves a few pages for people. The first visit asks for the API token and sets a cookie, so the call links in Claude's reports open straight away after that.
+
+- **`/`**, the call list: every call, newest first, with direction, who, length and result. It refreshes itself.
+- **`/calls/<id>`**, one call: the goal, the answers or message, notes and the full transcript. While a call is live, the page refreshes and the transcript grows.
+- **`/test`**, a form for trying the agent without Claude: a number or extension, an opening line and one question per line. Extensions can be called any time; outside numbers only within calling hours.
+
+With the PBX recordings mounted (`RECORDINGS_DIR`), a call page has a player and one Download line under it:
+
+- **recording with credit**: the call as a WAV, with "Made with AI on the Line" in its metadata and, unless `EXPORT_SPOKEN_CREDIT=false`, a short spoken credit at the end. The stored recording isn't changed. The line under it is the credit to paste if you publish the recording.
+- **test sample, re-voiced**: each side's audio with every voice replaced by the agent's, at the same timing, plus the redacted transcript with timings. This is the one to share, after reading its transcript. It takes a few seconds and is refused while a call is in progress.
+- **test sample, original audio**: the same with the real recording. Keep it to yourself.
+
+Without the recordings there's no player, and the only download is a test sample with the transcript and timings. [test-samples.md](test-samples.md) explains samples and how to contribute one.
+
 ## Updating
 
 ```bash
