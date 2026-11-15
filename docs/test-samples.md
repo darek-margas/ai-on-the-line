@@ -4,33 +4,48 @@ Most of what goes wrong on a call is timing, not words. Someone says "Ah." and c
 
 So the useful thing to collect is the other side's audio on its own, with a transcript that says roughly when each line was said. That can be played back into the agent in a test, and the test can check when the agent spoke.
 
+## Re-voiced or original
+
+The trouble is that the interesting calls have someone else's voice on them: a receptionist, a salesperson, a support agent. They didn't agree to be recorded for anyone's project, let alone published.
+
+So samples come in two versions:
+
+- **Re-voiced.** Every stretch of speech is replaced by the agent's TTS voice reading the redacted transcript of it. It starts at the same moment, lasts exactly as long and is as loud. Stretches where nothing was recognised (a cough, line noise, a bit of hold music) become noise of the same loudness. The pauses between and around them stay exactly where they were. Nobody's voice is left, only the timing. This is the version to share.
+- **Original.** The audio as the PBX recorded it. Keep it to yourself unless everyone on it agreed.
+
+The re-voiced version loses accents, mumbling and line quality, which matter to speech recognition. What it keeps (when speech starts and stops, how long the pauses are, a two-part answer arriving in two bursts) is what the turn-taking depends on.
+
+## What's in a sample
+
 A sample is a zip:
 
 | File | What it is |
 | --- | --- |
-| `other.wav` | The other side only, as the PBX received it (agent calls, with the recordings mounted) |
+| `other.wav` | The other side only (agent calls, with the recordings mounted) |
 | `agent.wav` | The agent only |
 | `call.wav` | Both sides mixed |
-| `recording.wav` | A recording made outside the agent, as recorded |
-| `transcript.json` | Lines with `t` (seconds from the start), `who` and `text` |
+| `recording.wav` | A recording made outside the agent |
+| `transcript.json` | Lines with `t` (seconds from the start), `who` and `text`; `"revoiced": true` if it is |
 | `transcript.txt` | The same, for reading |
-| `README.txt` | What the files are |
+| `README.txt` | What the files are, and which version this is |
 
 Only the files that exist go in. Phone numbers and the brief aren't included.
 
 ## From a call the agent made or answered
 
-Open the call page and use the **Test sample** link under the transcript. If `RECORDINGS_DIR` points at the PBX's recordings, the zip has each side on its own. Without it you get the transcript and timings only; the audio then has to come from the PBX (see below, or copy `phone-agent/<call id>-rx.wav` from `/var/spool/asterisk/monitor`).
+The call page has two links under the transcript: **re-voiced** and **original audio**. Both need `RECORDINGS_DIR` pointing at the PBX's recordings (see [the FreePBX guide](asterisk-freepbx.md#12-recordings-in-the-container)). Without it there's a single link with the transcript and timings only.
 
-The same from the command line:
+Re-voicing sends every stretch of speech through Whisper and Piper, so it takes a few seconds: about 7 for a 46-second call on my setup. It's refused while a call is in progress, so it doesn't slow down a live call.
+
+From the command line:
 
 ```sh
-docker compose exec phone-agent python -m phone_agent.sample --call 3f2a91c0 -o /data/sample.zip
+docker compose exec phone-agent python -m phone_agent.sample --call 3f2a91c0 --revoice -o /data/sample.zip
 ```
 
-The call id can be shortened to its first characters. `/data` is the container's data folder, so the file ends up in `./data` next to your `docker-compose.yml`.
+Leave out `--revoice` for the original audio. The call id can be shortened to its first characters. `/data` is the container's data folder, so the file ends up in `./data` next to your `docker-compose.yml`.
 
-Calls recorded before 2026.11.1.1 have no timings; their lines show `?` for the time.
+Calls recorded before 2026.11.1.1 have no timings in the transcript; their lines show `?`. The audio's timing is still exact.
 
 ## From any FreePBX recording
 
@@ -39,20 +54,18 @@ Calls you took yourself are often the best material: a salesperson who doesn't s
 With that folder mounted as `RECORDINGS_DIR`:
 
 ```sh
-docker compose exec phone-agent python -m phone_agent.sample \
+docker compose exec phone-agent python -m phone_agent.sample --revoice \
     --recording 2026/11/14/external-0255501234-0412000000-20261114-101501-1763082901.12.wav \
     --who caller,me -o /data/sample.zip
 ```
 
-Or copy the file into `./data` first and pass `/data/<file>.wav`. The tool finds stretches of speech, transcribes each one with your Whisper server, and writes the same zip with the original file as `recording.wav`. A stereo recording is taken as one side per channel, and `--who` names them; a mono one has a single `line` speaker. Only 16-bit WAV is read: convert anything else with `sox in.gsm -b 16 out.wav` first.
+Or copy the file into `./data` first and pass `/data/<file>.wav`. The tool finds stretches of speech and transcribes each one with your Whisper server. With `--revoice` it also re-voices them, and without it it copies the original. A stereo recording is taken as one side per channel, and `--who` names them. A mono recording has a single `line` speaker, so both people end up in the same TTS voice. Only 16-bit WAV is read: convert anything else with `sox in.gsm -b 16 out.wav` first.
 
 ## Before you share one
 
-The text is redacted: numbers, email addresses, long references (`BBA7Q2K9`, or a reference read out letter by letter) and the owner's name become `<number>`, `<email>`, `<ref>` and `<owner>`. Read the transcript anyway; a name or address said in words won't be caught.
+Read `transcript.txt`, even for a re-voiced sample: the voice is gone, but the words are still there, read out. Numbers, email addresses, long references (`BBA7Q2K9`, or one read out letter by letter) and the owner's name are replaced automatically. The re-voiced audio says "a number", "an email address", "a reference" and "Alex" in their place. A name, a street or a company said in plain words isn't caught. If one is there, cut that stretch with Audacity, or don't share the sample.
 
-The audio isn't redacted, and can't be automatically. Listen to the whole thing. Share only calls where the other person agreed to be recorded, or ones you're otherwise free to publish, such as your own voice playing a caller against your own screener. Cut or bleep anything private with Audacity or `sox` before sharing.
-
-To contribute a sample, open a [Test sample issue](https://github.com/darek-margas/ai-on-the-line/issues/new?template=test_sample.yml) and attach the zip. Samples added to the project are shared under CC BY-SA 4.0, like the rest of `docs/`.
+To contribute, open a [Test sample issue](https://github.com/darek-margas/ai-on-the-line/issues/new?template=test_sample.yml) and attach a **re-voiced** zip. Original audio is accepted only when every voice on it is yours, for example you playing a caller against your own screener. The project doesn't take original recordings of anyone else, publicly or privately. Samples added to the project are shared under CC BY-SA 4.0, like the rest of `docs/`.
 
 ---
 

@@ -164,6 +164,10 @@ class CallManager:
             call.changed()
             call.done.set()
 
+    def busy(self) -> bool:
+        """A call is being set up or is in progress."""
+        return any(c.status not in FINAL_STATUSES and c.status != "queued" for c in self.calls.values())
+
     def get(self, call_id: str) -> dict[str, Any] | None:
         if call_id in self.calls:
             return self.calls[call_id].to_row()

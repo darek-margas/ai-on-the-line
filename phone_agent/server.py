@@ -25,7 +25,7 @@ from .config import Config
 from .credit import SPOKEN_CREDIT, credit_line, with_credit
 from .db import Database
 from .dialog import DEFAULT_MUST_NOT, Brief, Dialog
-from .sample import call_sample
+from .sample import call_sample, revoiced_call_sample
 from .speech import Speech
 
 log = logging.getLogger(__name__)
@@ -353,9 +353,16 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             f"<table class='answers'>{answers or '<tr><td class=muted>none yet</td></tr>'}</table>"
             f"{'<h2>Notes</h2><ul>' + notes + '</ul>' if notes else ''}"
             f"<h2>Transcript</h2><div class='transcript'>{lines or '<p class=muted>none yet</p>'}</div>"
-            f"<p class='muted'><a href='/calls/{call['id']}/sample.zip'>Test sample</a>: "
-            f"{'audio of each side and' if cfg.recordings_dir and call['recording'] else 'the'} transcript with "
-            "timings, text redacted, for tuning and tests. Listen before you share it.</p>"
+            + (
+                f"<p class='muted'>Test sample, for tuning and tests: "
+                f"<a href='/calls/{call['id']}/sample.zip?revoice=1'>re-voiced</a> (every voice replaced by the "
+                "agent's, same timing; read the transcript, then share it) or "
+                f"<a href='/calls/{call['id']}/sample.zip'>original audio</a> (keep it private). "
+                "Both have the transcript with timings, text redacted.</p>"
+                if cfg.recordings_dir and call["recording"] else
+                f"<p class='muted'><a href='/calls/{call['id']}/sample.zip'>Test sample</a>: the transcript with "
+                "timings, text redacted. Mount the PBX recordings (RECORDINGS_DIR) to include audio.</p>"
+            )
         )
         live = call["status"] not in ("finished", "not_answered", "failed")
         return HTMLResponse(page(call["callee"] or "Call", body, refresh=live))
@@ -377,9 +384,22 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         call = manager.get(request.path_params["call_id"])
         if call is None:
             return Response(status_code=404)
-        body = await asyncio.to_thread(call_sample, call, cfg.owner_name, cfg.recordings_dir)
         day = when(call["started"] or call["created"], "%Y-%m-%d")
-        name = f"ai-on-the-line-sample-{day}-{call['id'][:8]}.zip"
+        if request.query_params.get("revoice") == "1":
+            # Re-voicing runs every stretch of speech through Whisper and Piper:
+            # don't take them away from a live call.
+            if manager.busy():
+                return HTMLResponse(page("Busy", "<p>A call is in progress. Try again when it's finished.</p>"),
+                                    status_code=409)
+
+            def make_speech(rate: int) -> Speech:
+                return Speech(cfg.stt, cfg.tts, cfg.stt_language, cfg.tts_voice, rate, cfg.tts_pronounce)
+
+            body = await revoiced_call_sample(call, cfg.owner_name, cfg.recordings_dir, make_speech)
+            name = f"ai-on-the-line-sample-{day}-{call['id'][:8]}-revoiced.zip"
+        else:
+            body = await asyncio.to_thread(call_sample, call, cfg.owner_name, cfg.recordings_dir)
+            name = f"ai-on-the-line-sample-{day}-{call['id'][:8]}.zip"
         return Response(body, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={name}"})
 
     @mcp.custom_route("/recordings/{call_id}/download.wav", methods=["GET"])

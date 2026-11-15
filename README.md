@@ -83,7 +83,7 @@ You need:
 
 Which numbers it may dial is a setting. The default is Australian mobiles, landlines, 1800 numbers and internal extensions; other countries, number types and patterns are in [docs/dialling.md](docs/dialling.md). Emergency numbers are refused whatever the settings say.
 
-To help with turn-taking, the call page exports a [test sample](docs/test-samples.md): each side's audio and a redacted transcript with timings. The same tool works on any FreePBX recording.
+To help with turn-taking, the call page exports a [test sample](docs/test-samples.md): each side's audio and a redacted transcript with timings. The re-voiced version replaces every voice with the TTS voice at the same timing, so it can be shared without putting anyone's voice online. The same tool works on any FreePBX recording.
 
 The full setup is in two guides: [running the agent](docs/running-the-agent.md) (image, settings, speech, ports, updates) and [the Asterisk side](docs/asterisk-freepbx.md). The short version:
 
@@ -115,6 +115,6 @@ It has been making real calls from my home PBX for a few weeks: shops, a paddle 
 
 Recordings of the outgoing calls aren't published while I look into the legal side of putting other people's voices online; their transcripts are in the stories. The screener recordings are me playing the caller.
 
-What helps most is [test samples](docs/test-samples.md) of calls where the timing goes wrong, and reports from other PBXes and trunks. Asterisk is the only telephony backend so far. A backend that registers straight to a SIP account is the obvious next piece.
+What helps most is re-voiced [test samples](docs/test-samples.md) of calls where the timing goes wrong, and reports from other PBXes and trunks. Asterisk is the only telephony backend so far. A backend that registers straight to a SIP account is the obvious next piece.
 
 Written by Darek Margas, with Claude Code doing much of the typing.

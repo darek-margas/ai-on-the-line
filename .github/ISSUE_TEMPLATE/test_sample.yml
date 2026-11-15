@@ -1,25 +1,28 @@
 name: Test sample
-description: Share a call recording and transcript where the agent's timing went wrong (or a call it should be able to handle).
+description: Share a re-voiced call where the agent's timing went wrong (or a call it should be able to handle).
 title: "Test sample: <what happens on the call>"
 labels: ["test sample"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks. A sample is a zip with the other side's audio and a transcript with timings.
+        Thanks. A sample is a zip with each side's audio and a transcript with timings.
         How to make one: [docs/test-samples.md](../blob/main/docs/test-samples.md).
 
-        **From a call the agent made or answered:** the call page, **Test sample** link under the transcript.
+        **Attach a re-voiced sample.** Every voice in it is replaced by the TTS voice at the same
+        timing, so nobody's real voice ends up in this issue. Original audio is only OK if every
+        voice on it is yours.
+
+        **From a call the agent made or answered:** the call page, **re-voiced** link under the transcript.
 
         **From any FreePBX recording:**
 
         ```sh
-        docker compose exec phone-agent python -m phone_agent.sample --recording <file.wav> --who caller,me -o /data/sample.zip
+        docker compose exec phone-agent python -m phone_agent.sample --revoice --recording <file.wav> --who caller,me -o /data/sample.zip
         ```
 
-        > ⚠️ **Listen to the whole recording before you attach it.** The transcript is redacted
-        > (numbers, email addresses, references, your name), the audio is not. Only share calls
-        > where the other person agreed to be recorded, or that you're otherwise free to publish.
+        > ⚠️ **Read transcript.txt before you attach it.** Numbers, email addresses, references and
+        > your name are replaced automatically, but a name, street or company said in words isn't.
         > This issue will be public.
   - type: textarea
     id: what
@@ -52,7 +55,9 @@ body:
     attributes:
       label: Before submitting
       options:
-        - label: I listened to all of the audio and nothing private is left in it.
+        - label: The sample is re-voiced, or every voice in it is mine.
           required: true
-        - label: I may share this recording, and agree it's added to the project under CC BY-SA 4.0.
+        - label: I read transcript.txt and nothing private is left in it.
+          required: true
+        - label: I agree it's added to the project under CC BY-SA 4.0.
           required: true
