@@ -8,7 +8,20 @@ This is a cold caller I played against my own call screener. He starts as "Mark 
 
 https://github.com/user-attachments/assets/c5355d7f-9d6a-4246-919f-8cea8631e3a7
 
-Two more in the same vein, an "urgent personal matter" that turns into a car warranty and a free holiday with a property presentation attached, are in [three pitches against the screener](docs/stories/three-pitches.md).
+## All the calls
+
+Each one has a trimmed transcript and a note on what it taught me. The screener calls also have recordings: I was the caller there. The outbound calls went to real businesses, so those are transcripts only.
+
+| Call | Direction | What happens |
+|---|---|---|
+| ["This is Mark from IT"](docs/stories/three-pitches.md#this-is-mark-from-it) | Answering, recorded | A fake IT colleague asks for my work email, then admits he's a vendor selling dark-web monitoring |
+| ["It's personal, quite urgent"](docs/stories/three-pitches.md#its-personal-quite-urgent) | Answering, recorded | An urgent private matter turns into a car warranty, and he wants my date of birth |
+| ["You've won a holiday"](docs/stories/three-pitches.md#youve-won-a-holiday) | Answering, recorded | A free Gold Coast trip with a property presentation attached; he gives up first |
+| [The security salesman](docs/stories/purgatory-salesman.md) | Answering | The earlier screener test: a pitch for a basement to lock your car in, and the agent wants to know about the door |
+| [Organic honey](#what-its-actually-for) | Calling out | A supermarket voice robot, hold beeps, a person checking the shelf, and a report that says the price was a guess |
+| [Paddle steamers in December](docs/stories/paddle-steamers.md) | Calling out | 88 seconds, and an answer no website had: one boat sold, one in survey |
+| [The pink wallet](docs/stories/lost-wallet.md) | Calling out | A voice robot and a transfer to the store, and what the agent used to say into the hold queue |
+| [Chasing a refund](docs/stories/refund-call.md) | Calling out | Reads fine on paper, sounded bad: the call behind most of the turn-taking fixes |
 
 ## What it's actually for
 
@@ -21,8 +34,6 @@ Here's one: a request typed into Claude at 9:25 pm, a call to a supermarket, and
 <img src="docs/images/sample-call.png" alt="Claude is asked to ring a nearby Woolworths about organic honey. It finds the store numbers, places the call, gets past the store's voice robot, waits while a staff member checks the shelf, and reports brands, origin and rough prices, noting that the prices were only a guess." width="720">
 
 The store's number went to Woolworths' own voice assistant first, which wanted the request "in a few short words". The agent gave it one sentence and got put on hold. Thirty seconds of beeps later a person picked up, walked off to check the shelf, and came back with two brands and a guessed price. The report says the price was a guess, because she said "off the top of my head". I care about that more than about the call working: a confident report built on someone's guess is worse than no report.
-
-More calls, each with what it taught me, are in [docs/stories](docs/stories/README.md): a paddle steamer operator asked about December, a lost wallet chased through a supermarket voice robot, and a refund call that read fine on paper but sounded bad, which led to most of the turn-taking fixes.
 
 ## Answering your calls: Purgatory
 
