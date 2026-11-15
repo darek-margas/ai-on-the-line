@@ -38,6 +38,7 @@ INTRO_PAUSE_SECONDS = 2.5  # quiet after our introduction before we just carry o
 # full stop, which it often does on a complete sentence.
 CONTINUE_SECONDS = 1.5
 TRAILING_OFF_SECONDS = 2.5
+MID_SENTENCE_MAX_SECONDS = 25  # longest we wait for a sentence they're in the middle of (VAD cuts at 20 s)
 LONE_THANKS_SECONDS = 10.0  # a bare "Thank you." later than this after our question is Whisper hearing noise
 AFTER_GOODBYE_SECONDS = 2.0  # listen after our goodbye before hanging up
 THINKING_SECONDS = 20  # quiet after our question is them thinking, not a reason to re-ask
@@ -417,6 +418,17 @@ class CallSession:
                         break
                     last = next((h for h in reversed(heard) if h), "")
                     more = await self._next_utterance(timeout=TRAILING_OFF_SECONDS if trails_off(last) else CONTINUE_SECONDS)
+                    if more is None:
+                        break
+                    if more is HANGUP:
+                        call.set_outcome(self._hangup_outcome())
+                        return
+                    heard.append(await self._heard(more))
+                # Never start a reply while they're mid-sentence. The wait above can
+                # run out just as they start again ("...in the breach of" ... "something,
+                # so I need to notify him"), and then we'd talk over the rest.
+                while self.segmenter.in_speech:
+                    more = await self._next_utterance(timeout=MID_SENTENCE_MAX_SECONDS)
                     if more is None:
                         break
                     if more is HANGUP:

@@ -609,3 +609,33 @@ async def test_long_answer_is_not_silence(tmp_path, monkeypatch):
 
     assert not any("No speech from the callee" in e for e in dialog.events), dialog.events
     assert dialog.calls == 1 and "just spoke" in dialog.events[0]
+
+
+@pytest.mark.asyncio
+async def test_no_reply_starts_while_they_talk(tmp_path):
+    """'...found his company in the breach of' then a pause just past the
+    trailing-off wait, then 'something, so I need to notify him': one reply
+    after both parts, not one that starts while they're talking."""
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    speech = ScriptedSpeech(["Hello?", "We found his company in the breach of...", "something, so I need to notify him."])
+    dialog = SlowDialog()
+    manager = CallManager(cfg, db, speech, dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    # The second part starts ~1.2 s after the first ends and lasts 2 s, so the
+    # 2.5 s wait for the rest of the first runs out while the second is under way.
+    ari = BurstAri(server.sockets[0].getsockname()[1], [25, 50, 100], gaps=[75, 60, 300])
+    manager.ari = ari
+
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    try:
+        brief = Brief(goal="Screen", callee="Caller", opening_line="Hi, what's it about?", questions={"reason": "why"})
+        call = manager.start_call("0285550000", brief)
+        await asyncio.wait_for(call.done.wait(), 60)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+
+    assert dialog.seen[0][-2:] == ["We found his company in the breach of...", "something, so I need to notify him."], dialog.seen
