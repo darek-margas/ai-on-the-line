@@ -84,7 +84,7 @@ Check that the module is there:
 asterisk -rx "module show like audiosocket"
 ```
 
-Recordings end up in `/var/spool/asterisk/monitor/phone-agent/`, named after the call ID. To play them on the call page, download them with the credit, and export [test samples](test-samples.md) with each side's audio, mount `/var/spool/asterisk/monitor` itself (not the `phone-agent` folder) into the container, read-only, and set `RECORDINGS_DIR` to where it's mounted. Mounting the whole folder also lets the sample tool read FreePBX's own recordings.
+Recordings end up in `/var/spool/asterisk/monitor/phone-agent/`, named after the call ID. To play them on the call page, download them with the credit, and export [test samples](test-samples.md) with each side's audio, the container needs read access to `/var/spool/asterisk/monitor`; [section 12](#12-recordings-in-the-container) shows how I share it over NFS.
 
 FreePBX's call history (Reports → CDR) won't show them as they are: it only plays files in `monitor/YYYY/MM/DD/` whose name has the date as its fourth dash-separated part, the way its own recordings are named. The version of this context in [`asterisk/extensions_custom.conf`](../asterisk/extensions_custom.conf) handles that: it sets `CDR(recordingfile)` to a name like `agent-out-0491570156-20261115-120313-<call id>.wav`, and when the recording finishes it symlinks the file into that day's folder. The incoming-call context below does the same with `agent-in-`. I noticed this only after recording a set of test calls I wanted to keep and finding no play buttons for them.
 
@@ -222,11 +222,83 @@ I imported my iPhone contacts with `tools/contacts_to_freepbx.py` (vCard to nati
 
 The fallback goes to voicemail 101. I replaced its greeting with one recorded by the same Piper voice, so it doesn't sound like a different system, and turned off the standard "after the tone" instructions (`VM_OPTS=s` in voicemail settings), because the custom greeting already says it.
 
+## 12. Recordings in the container
+
+The call page can play each call, offer it as a download with the credit, and put each side's audio into a [test sample](test-samples.md). For that the container needs to read FreePBX's recordings. FreePBX has no module that shares a folder (Filestore only sends backups out), so I run a plain NFS server next to it, read-only, open to the Docker host only.
+
+On the PBX:
+
+```bash
+apt-get install -y nfs-kernel-server
+id asterisk     # note the uid and gid, 999 and 996 on mine
+```
+
+Add to `/etc/exports`, with the Docker host's address and the asterisk uid and gid:
+
+```
+/var/spool/asterisk/monitor 192.0.2.20(ro,all_squash,anonuid=999,anongid=996,no_subtree_check,sync)
+```
+
+then `exportfs -ra`. `ro` and `all_squash` mean that whatever user reads from the Docker host, the PBX treats it as asterisk and only lets it read. Export the whole `monitor` folder, not `monitor/phone-agent`: the agent finds recordings by a path that starts with `phone-agent/`, and the sample tool can then also read FreePBX's own recordings.
+
+The FreePBX firewall has to let the Docker host reach port 2049. Mine has the whole LAN in the Trusted zone, so nothing was needed. If yours doesn't, add the Docker host under Connectivity → Firewall → Networks as Trusted.
+
+On the Docker host (Ubuntu here):
+
+```bash
+apt-get install -y nfs-common
+mkdir -p /mnt/freepbx-monitor
+echo "pbx.lan:/var/spool/asterisk/monitor /mnt/freepbx-monitor nfs ro,soft,timeo=50,retrans=2,_netdev,nofail,x-systemd.automount 0 0" >> /etc/fstab
+systemctl daemon-reload && ls /mnt/freepbx-monitor
+```
+
+`nofail` and `x-systemd.automount` matter when both machines come back after a power cut: the Docker host boots and the agent starts even if the PBX isn't up yet, and the folder mounts the first time it's read.
+
+Then in `docker-compose.yml` uncomment
+
+```yaml
+      - /mnt/freepbx-monitor:/recordings:ro
+```
+
+set `RECORDINGS_DIR=/recordings` in `.env`, and `docker compose up -d`. A call page should now have a player and a "Download with credit" link.
+
+Docker can also mount NFS itself, which keeps everything in the compose file and needs nothing in `/etc/fstab`:
+
+```yaml
+services:
+  phone-agent:
+    volumes:
+      - pbx-monitor:/recordings:ro
+volumes:
+  pbx-monitor:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=192.0.2.10,ro,soft,nfsvers=4
+      device: ":/var/spool/asterisk/monitor"
+```
+
+I don't use it. If the PBX is down when the container starts, Docker can't create the volume and the agent doesn't start at all. The `fstab` way the agent starts anyway and the recordings appear once the PBX is back.
+
+## 13. After reinstalling FreePBX
+
+Updating modules (`fwconsole ma upgradeall`) or Debian packages leaves all of this alone. A major upgrade is usually a fresh install plus a FreePBX backup restore, and the backup brings back the dialplan in `extensions_custom.conf` and `globals_custom.conf`, the ARI and AMI users and the inbound routes. It doesn't bring back anything outside FreePBX itself. After a reinstall, redo:
+
+- `/usr/local/bin/agent-recording-finish` (copy it from `asterisk/` and make it executable). Without it calls are still recorded, but not levelled and not listed in call history.
+- The AudioSocket module, if the new Asterisk build doesn't load it.
+- The NFS server and the line in `/etc/exports` (section 12).
+- The test receptionist's six sound files (`custom/pa-test-1` to `pa-test-6`). Its dialplan is in `extensions_custom.conf` and comes back, but sound files copied in by hand aren't part of the backup unless you added them through System Recordings.
+- The firewall: check the Docker host is still trusted, for ports 8088 (ARI), 9092 (AudioSocket, the other way) and 2049 (NFS).
+
+Then run `check_setup` and a call to 7999. A missing piece shows up as a missing player on the call page, a call with no keypresses, or calls that never connect.
+
 ## Troubleshooting
 
 `check_setup` tells you which piece is broken: Piper, Whisper, ARI or the model.
 
 If calls originate but the far end hears nothing, `AUDIOSOCKET_ADVERTISE` is usually wrong, or the Docker host's firewall blocks port 9092 from the PBX.
+
+If call pages have no player, check `ls /mnt/freepbx-monitor` on the Docker host. An empty folder usually means the PBX firewall blocks port 2049 or the export lists a different address (`exportfs -v` on the PBX).
 
 If keypresses don't work, check the AMI user's `permit` line and that `webenabled = yes`. `asterisk -rx "manager show users"` should list it.
 
