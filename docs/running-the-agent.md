@@ -99,6 +99,8 @@ Then ask it to run `check_setup`, and to call the test receptionist on 7999.
 
 The tools are `place_call`, `get_call`, `list_calls`, `hang_up` and `check_setup`. Calls take minutes, so Claude places a call and then polls `get_call`. The MCP server's own instructions tell it how to write a brief and report back, so a plain request like "ring these three motels and ask about a family room on the 12th" works.
 
+Let Claude ask before every `place_call`: in Claude Code, don't add it to `permissions.allow`. The other four tools are safe to allow. Transcripts carry callers' words into the session that can dial, and a person approving each call is what stops a caller from talking it into one. More in [SECURITY.md](../SECURITY.md).
+
 ## The web pages
 
 Port 8090 also serves a few pages for people. The first visit asks for the API token and sets a cookie, so the call links in Claude's reports open straight away after that.
