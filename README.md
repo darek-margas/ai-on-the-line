@@ -6,7 +6,7 @@ Give it a goal and it phones the place, gets past the menu and the hold music, t
 
 This is a cold caller I played against my own call screener. He starts as "Mark from IT" with a security incident, asks for my work email, then admits he's a vendor selling dark-web monitoring. The agent catches the change of story, gives nothing away, and keeps asking how the product works until he runs out of answers.
 
-https://github.com/user-attachments/assets/c5355d7f-9d6a-4246-919f-8cea8631e3a7
+https://github.com/user-attachments/assets/d300ce6a-5c7d-41b3-86de-84f757565766
 
 ## All the calls
 

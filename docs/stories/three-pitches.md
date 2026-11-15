@@ -6,7 +6,7 @@ All three transcripts are trimmed. The players are the whole calls, with both si
 
 ## "It's personal, quite urgent"
 
-https://github.com/user-attachments/assets/095bc42b-b4a1-4d45-b42a-f794b512b46e
+https://github.com/user-attachments/assets/6ba902ca-463e-4790-aebb-15448123cd3e
 
 Download: [screener-personal-matter.ogg](../audio/screener-personal-matter.ogg) (whole call, 1:56, 8 kHz)
 
@@ -32,7 +32,7 @@ Agent:  Oh, I can't confirm any personal details like that, Jonathan. Which deal
 
 ## "This is Mark from IT"
 
-https://github.com/user-attachments/assets/c5355d7f-9d6a-4246-919f-8cea8631e3a7
+https://github.com/user-attachments/assets/d300ce6a-5c7d-41b3-86de-84f757565766
 
 Download: [screener-mark-from-it.ogg](../audio/screener-mark-from-it.ogg) (whole call, 2:26, 8 kHz)
 
@@ -64,7 +64,7 @@ This call also had a glitch. After "in the breach of..." I paused for about two 
 
 ## "You've won a holiday"
 
-https://github.com/user-attachments/assets/abd7110a-ae39-42a4-994a-e9fa2bcee8d7
+https://github.com/user-attachments/assets/e3be7294-5aed-4c0b-8d4d-ca32ab728f0f
 
 Download: [screener-gold-coast-holiday.ogg](../audio/screener-gold-coast-holiday.ogg) (whole call, 2:43, 8 kHz)
 
