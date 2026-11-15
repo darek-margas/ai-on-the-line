@@ -1,0 +1,60 @@
+# Saves GitHub's traffic numbers (views, clones, referrers, popular pages)
+# every day to the traffic-stats branch, because GitHub only shows 14 days.
+#
+# Needs a repository secret TRAFFIC_TOKEN: a fine-grained personal access
+# token for this repository only, with "Administration: Read-only". The
+# workflow's own token can't read traffic.
+name: Traffic stats
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: traffic-stats
+
+jobs:
+  save:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+          path: main
+
+      - name: Check out the stats branch (created on the first run)
+        run: |
+          git clone --quiet "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" stats
+          cd stats
+          if git ls-remote --exit-code --heads origin traffic-stats >/dev/null; then
+            git checkout --quiet traffic-stats
+          else
+            git checkout --quiet --orphan traffic-stats
+            git rm -rq --cached . && git clean -fdq
+            printf '# Traffic stats\n\nDaily copies of the repository traffic numbers, written by .github/workflows/traffic.yml on main.\n' > README.md
+          fi
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Fetch and merge
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::TRAFFIC_TOKEN secret is not set; nothing saved (see the comment at the top of traffic.yml)"
+            exit 0
+          fi
+          python main/.github/scripts/traffic.py "$GITHUB_REPOSITORY" stats
+        env:
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+
+      - name: Commit
+        run: |
+          cd stats
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "no change"; exit 0; }
+          git commit --quiet -m "Traffic $(date -u +%F)"
+          git push --quiet origin traffic-stats
