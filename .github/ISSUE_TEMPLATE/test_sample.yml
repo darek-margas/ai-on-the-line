@@ -1,0 +1,58 @@
+name: Test sample
+description: Share a call recording and transcript where the agent's timing went wrong (or a call it should be able to handle).
+title: "Test sample: <what happens on the call>"
+labels: ["test sample"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. A sample is a zip with the other side's audio and a transcript with timings.
+        How to make one: [docs/test-samples.md](../blob/main/docs/test-samples.md).
+
+        **From a call the agent made or answered:** the call page, **Test sample** link under the transcript.
+
+        **From any FreePBX recording:**
+
+        ```sh
+        docker compose exec phone-agent python -m phone_agent.sample --recording <file.wav> --who caller,me -o /data/sample.zip
+        ```
+
+        > ⚠️ **Listen to the whole recording before you attach it.** The transcript is redacted
+        > (numbers, email addresses, references, your name), the audio is not. Only share calls
+        > where the other person agreed to be recorded, or that you're otherwise free to publish.
+        > This issue will be public.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens on the call
+      description: Where the agent spoke too early or too late, misheard, or got stuck. Times from transcript.txt help.
+      placeholder: "At 12.4 s she says \"Ah.\" and keeps going; the agent starts its answer over her."
+    validations:
+      required: true
+  - type: input
+    id: kind
+    attributes:
+      label: Kind of call
+      placeholder: e.g. shop receptionist, voice robot, hold queue, cold caller
+  - type: input
+    id: setup
+    attributes:
+      label: Line and voices
+      description: Trunk or codec, Whisper model, Piper voice, if you know them.
+      placeholder: e.g. SIP trunk G.711, faster-whisper large-v3-turbo, Jenny
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample
+      description: Attach the zip here (drag and drop).
+    validations:
+      required: true
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Before submitting
+      options:
+        - label: I listened to all of the audio and nothing private is left in it.
+          required: true
+        - label: I may share this recording, and agree it's added to the project under CC BY-SA 4.0.
+          required: true

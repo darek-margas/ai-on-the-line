@@ -16,6 +16,7 @@ from .ari import Ari
 from .config import Config
 from .db import Database
 from .dialog import Brief, Dialog
+from .dialing import normalize_number
 from .inbound import PROFILES
 from .session import FILLERS, CallSession, opening_lines, split_sentences
 from .speech import Speech
@@ -24,35 +25,6 @@ log = logging.getLogger(__name__)
 
 FINAL_STATUSES = {"finished", "not_answered", "failed"}
 INBOUND_CONNECT_SECONDS = 30  # registered incoming call whose audio never arrives
-
-
-def normalize_au_number(phone: str) -> str:
-    """'+61 8 5550 1234' -> '0855501234'. Leaves other formats, including
-    internal extensions like '100', as bare digits."""
-    digits = re.sub(r"[^\d+]", "", phone)
-    if digits.startswith("+61"):
-        digits = "0" + digits[3:]
-    elif digits.startswith("61") and len(digits) == 11:
-        digits = "0" + digits[2:]
-    digits = digits.lstrip("+")
-    if not any(re.fullmatch(pattern, digits) for pattern in DIALABLE):
-        raise ValueError(
-            f"won't dial {phone!r}: only mobiles (04...), landlines with an area code (02/03/07/08), "
-            "8-digit Sydney numbers, 1800 numbers and internal extensions are allowed "
-            "(no 13/1300, premium 19xx, emergency or international numbers)"
-        )
-    return digits
-
-
-# The owner's dialling rules. Anything else is refused, whatever the outbound
-# routes on the PBX would allow.
-DIALABLE = [
-    r"04\d{8}",        # mobiles
-    r"0[2378]\d{8}",   # landlines with area code
-    r"[2-9]\d{7}",     # Sydney local, no 02
-    r"1800\d{6}",      # free call
-    r"(?!112$|106$)[1-9]\d{1,4}",  # internal extensions; not 000/112/106 (emergency)
-]
 
 
 @dataclass
@@ -68,6 +40,8 @@ class CallState:
     answers: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     transcript: list[tuple[str, str]] = field(default_factory=list)
+    # Seconds from the start of the call to each transcript line (approximate).
+    timings: list[float | None] = field(default_factory=list)
     channel_id: str | None = None
     recording: str | None = None
     started: float | None = None
@@ -77,8 +51,10 @@ class CallState:
     conversation_over: asyncio.Event = field(default_factory=asyncio.Event)
     done: asyncio.Event = field(default_factory=asyncio.Event)  # final state saved
 
-    def add_transcript(self, who: str, text: str) -> None:
+    def add_transcript(self, who: str, text: str, at: float | None = None) -> None:
+        """at: when the line was said (time.time()), if not now."""
         self.transcript.append((who, text))
+        self.timings.append(round((at or time.time()) - self.started, 1) if self.started else None)
         self.changed()
 
     def mark_interrupted(self) -> None:
@@ -108,6 +84,7 @@ class CallState:
             "answers": self.answers,
             "notes": self.notes,
             "transcript": self.transcript,
+            "timings": self.timings,
             "recording": self.recording,
             "started": self.started,
             "ended": self.ended,
@@ -129,7 +106,7 @@ class CallManager:
 
     def start_call(self, phone: str, brief: Brief) -> CallState:
         call = CallState(id=str(uuid.uuid4()), phone=phone, brief=brief, owner=self.cfg.owner_name, db=self.db)
-        normalize_au_number(phone)  # fail fast on garbage
+        normalize_number(phone, self.cfg.dial_rules)  # refuse before queueing
         self.calls[call.id] = call
         call.changed()
         task = asyncio.create_task(self._run(call))
@@ -227,7 +204,7 @@ class CallManager:
                     return  # cancelled while queued or warming up: never dial
                 call.status = "dialing"
                 call.changed()
-                number = normalize_au_number(call.phone)
+                number = normalize_number(call.phone, self.cfg.dial_rules)
                 call.channel_id = await self.ari.originate(
                     self.cfg.dial_endpoint.format(number=number),
                     call.id,

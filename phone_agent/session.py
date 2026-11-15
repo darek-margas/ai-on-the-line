@@ -747,6 +747,8 @@ class CallSession:
     async def _heard(self, item: tuple[bytes, str | None]) -> str:
         pcm, overlapped_line = item
         text = ""
+        # Roughly when they started speaking: the utterance ends about now.
+        began = time.time() - len(pcm) / (2 * self.rate)
         if len(pcm) >= self.frame_bytes * MIN_UTTERANCE_MS // ass.FRAME_MS:
             t0 = time.monotonic()
             text = await self.speech.transcribe(pcm)
@@ -771,7 +773,7 @@ class CallSession:
                 log.info("call %s: noise, resuming speech", self.call.id)
                 self._paused_at = None
         if text:
-            self.call.add_transcript("callee", text)
+            self.call.add_transcript("callee", text, at=began)
             # Lets the dialog know it may not answer the question we were asking.
             self._heard_over_us = bool(overlapped_line)
         return text

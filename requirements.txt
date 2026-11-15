@@ -5,5 +5,6 @@ webrtcvad-wheels>=2.0.14
 numpy>=2.0
 soxr>=1.0
 httpx>=0.28
+phonenumbers>=9.0,<10
 uvicorn>=0.30
 tzdata

@@ -81,7 +81,9 @@ You need:
 - An Anthropic API key, or Ollama with a model that follows instructions well.
 - An MCP client. Claude Code and Claude Desktop both work.
 
-Number handling is Australian for now: it dials mobiles, landlines, 1800 numbers and internal extensions, and refuses 13/1300, premium 19xx, emergency and international numbers.
+Which numbers it may dial is a setting. The default is Australian mobiles, landlines, 1800 numbers and internal extensions; other countries, number types and patterns are in [docs/dialling.md](docs/dialling.md). Emergency numbers are refused whatever the settings say.
+
+To help with turn-taking, the call page exports a [test sample](docs/test-samples.md): each side's audio and a redacted transcript with timings. The same tool works on any FreePBX recording.
 
 The full setup, including the Asterisk side, is in [docs/asterisk-freepbx.md](docs/asterisk-freepbx.md). The short version:
 

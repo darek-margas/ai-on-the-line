@@ -3,7 +3,10 @@
 """Settings, read once from environment variables (see .env.example)."""
 
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
+
+from .dialing import TYPES, DialRules
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -80,6 +83,8 @@ class Config:
     # and the voice named in the credit line (empty if you use another voice).
     export_spoken_credit: bool = True
     credit_voice: str = "Jenny (Dioco)"
+    # Which numbers may be dialled (DIAL_* settings; see docs/dialling.md).
+    dial_rules: DialRules = field(default_factory=DialRules)
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -125,4 +130,32 @@ class Config:
             owner_bio=_env("OWNER_BIO", ""),
             export_spoken_credit=_env("EXPORT_SPOKEN_CREDIT", "true").lower() == "true",
             credit_voice=_env("CREDIT_VOICE", "Jenny (Dioco)"),
+            dial_rules=_dial_rules(),
         )
+
+
+def _dial_rules() -> DialRules:
+    defaults = DialRules()
+    allow = {t.strip().lower() for t in _env("DIAL_ALLOW", ",".join(sorted(defaults.allow))).split(",") if t.strip()}
+    unknown = allow - TYPES.keys()
+    if unknown:
+        raise RuntimeError(f"DIAL_ALLOW: unknown number types {sorted(unknown)}; known: {', '.join(TYPES)}")
+    rules = DialRules(
+        country=_env("DIAL_COUNTRY", defaults.country).strip().upper(),
+        allow=allow,
+        allow_international=_env("DIAL_INTERNATIONAL", "false").lower() == "true",
+        local_area_code=_env("DIAL_LOCAL_AREA_CODE", "").strip(),
+        extensions=_env("DIAL_EXTENSIONS", defaults.extensions).strip(),
+        allow_pattern=_env("DIAL_ALLOW_PATTERN", "").strip(),
+        block_pattern=_env("DIAL_BLOCK_PATTERN", "").strip(),
+        dial_format=_env("DIAL_FORMAT", defaults.dial_format).strip().lower(),
+    )
+    if rules.dial_format not in ("national", "e164"):
+        raise RuntimeError("DIAL_FORMAT must be national or e164")
+    for name, pattern in (("DIAL_EXTENSIONS", rules.extensions), ("DIAL_ALLOW_PATTERN", rules.allow_pattern),
+                          ("DIAL_BLOCK_PATTERN", rules.block_pattern)):
+        try:
+            re.compile(pattern)
+        except re.error as e:
+            raise RuntimeError(f"{name}: {e}") from None
+    return rules

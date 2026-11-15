@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS calls (
     answers TEXT,                  -- JSON {question: answer}
     notes TEXT,                    -- JSON list
     transcript TEXT,               -- JSON list of [speaker, text]
+    timings TEXT,                  -- JSON list: seconds from start to each transcript line
     recording TEXT,
     started REAL,
     ended REAL,
@@ -26,7 +27,7 @@ CREATE TABLE IF NOT EXISTS calls (
 );
 """
 
-JSON_COLUMNS = ("brief", "answers", "notes", "transcript")
+JSON_COLUMNS = ("brief", "answers", "notes", "transcript", "timings")
 
 
 class Database:
@@ -36,6 +37,10 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(calls)")}
+        if "timings" not in columns:  # databases from before 2026.11.1.1
+            self.conn.execute("ALTER TABLE calls ADD COLUMN timings TEXT")
+            self.conn.commit()
 
     def fail_unfinished_calls(self) -> None:
         """At service start: calls that were live when it stopped can't be resumed."""

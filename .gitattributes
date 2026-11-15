@@ -2,3 +2,5 @@
 *.png binary
 *.ogg binary
 *.wav binary
+# A 40-line FreePBX helper, not what the project is written in.
+asterisk/*.php linguist-detectable=false

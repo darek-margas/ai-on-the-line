@@ -25,6 +25,7 @@ from .config import Config
 from .credit import SPOKEN_CREDIT, credit_line, with_credit
 from .db import Database
 from .dialog import DEFAULT_MUST_NOT, Brief, Dialog
+from .sample import call_sample
 from .speech import Speech
 
 log = logging.getLogger(__name__)
@@ -124,7 +125,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         """Start a phone call. Returns a call_id immediately; poll get_call for the result.
 
         Args:
-            phone: Number to dial, e.g. "+61 8 5550 1234" or "08 5550 1234".
+            phone: Number to dial, in international form ("+61 8 5550 1234") or as dialled locally. The server's dialling rules decide what's allowed; a refused number fails here with the reason.
             callee: Who you're calling, e.g. "Riverside Motel reception".
             goal: One or two sentences: what this call should achieve.
             opening_line: First thing the agent says after they answer. Must introduce it as the owner's assistant (e.g. "Hi, I'm Alex's assistant") and say why it's calling.
@@ -352,6 +353,9 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             f"<table class='answers'>{answers or '<tr><td class=muted>none yet</td></tr>'}</table>"
             f"{'<h2>Notes</h2><ul>' + notes + '</ul>' if notes else ''}"
             f"<h2>Transcript</h2><div class='transcript'>{lines or '<p class=muted>none yet</p>'}</div>"
+            f"<p class='muted'><a href='/calls/{call['id']}/sample.zip'>Test sample</a>: "
+            f"{'audio of each side and' if cfg.recordings_dir and call['recording'] else 'the'} transcript with "
+            "timings, text redacted, for tuning and tests. Listen before you share it.</p>"
         )
         live = call["status"] not in ("finished", "not_answered", "failed")
         return HTMLResponse(page(call["callee"] or "Call", body, refresh=live))
@@ -365,6 +369,18 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         if not os.path.isfile(path):
             return Response(status_code=404)
         return FileResponse(path, media_type="audio/wav")
+
+    @mcp.custom_route("/calls/{call_id}/sample.zip", methods=["GET"])
+    async def sample_download(request: Request) -> Response:
+        """Audio (each side, if the recordings are mounted) and redacted
+        transcript with timings, as a zip. See phone_agent/sample.py."""
+        call = manager.get(request.path_params["call_id"])
+        if call is None:
+            return Response(status_code=404)
+        body = await asyncio.to_thread(call_sample, call, cfg.owner_name, cfg.recordings_dir)
+        day = when(call["started"] or call["created"], "%Y-%m-%d")
+        name = f"ai-on-the-line-sample-{day}-{call['id'][:8]}.zip"
+        return Response(body, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={name}"})
 
     @mcp.custom_route("/recordings/{call_id}/download.wav", methods=["GET"])
     async def recording_download(request: Request) -> Response:

@@ -8,7 +8,8 @@ import uuid
 import pytest
 
 from phone_agent import audiosocket as ass
-from phone_agent.calls import CallManager, normalize_au_number
+from phone_agent.calls import CallManager
+from phone_agent.dialing import DialRules, normalize_number
 from phone_agent.config import Config
 from phone_agent.db import Database
 from phone_agent.dialog import Brief, Turn, turn_schema
@@ -139,19 +140,41 @@ async def test_call_completes(tmp_path):
     assert dialog.calls == 1
 
 
-def test_normalize_number():
-    assert normalize_au_number("+61 8 5550 1234") == "0855501234"
-    assert normalize_au_number("(08) 5550 1234") == "0855501234"
-    assert normalize_au_number("61855501234") == "0855501234"
-    assert normalize_au_number("100") == "100"  # internal extension
-    assert normalize_au_number("0491 570 156") == "0491570156"
-    assert normalize_au_number("5550 1234") == "55501234"  # Sydney without 02
-    assert normalize_au_number("1800 123 456") == "1800123456"
-    assert normalize_au_number("101") == "101" and normalize_au_number("7999") == "7999"
-    for refused in ("call me", "13 13 13", "131313", "1300 123 456", "000", "112", "106", "1900 123 456",
-                    "+48 123 456 789", "5550 123"):
+def test_normalize_number_australia():
+    sydney = DialRules(local_area_code="02")
+    n = lambda phone: normalize_number(phone, sydney)
+    assert n("+61 8 5550 1234") == "0855501234"
+    assert n("(08) 5550 1234") == "0855501234"
+    assert n("61855501234") == "0855501234"
+    assert n("100") == "100"  # internal extension
+    assert n("0491 570 156") == "0491570156"
+    assert n("5550 1234") == "55501234"  # local, area code from DIAL_LOCAL_AREA_CODE
+    assert n("1800 123 456") == "1800123456"
+    assert n("101") == "101" and n("7999") == "7999"
+    for refused in ("call me", "", "13 13 13", "131313", "1300 123 456", "000", "112", "106", "1900 123 456",
+                    "+48 123 456 789", "+44 20 7946 0958", "5550 123"):
         with pytest.raises(ValueError):
-            normalize_au_number(refused)
+            n(refused)
+    with pytest.raises(ValueError):
+        normalize_number("5550 1234")  # no local area code set
+
+
+def test_normalize_number_other_countries_and_overrides():
+    uk = DialRules(country="GB")
+    assert normalize_number("020 7946 0958", uk) == "02079460958"
+    assert normalize_number("07400 123456", uk) == "07400123456"
+    for refused in ("999", "112", "09065 123456"):  # emergency, premium
+        with pytest.raises(ValueError):
+            normalize_number(refused, uk)
+    assert normalize_number("+44 20 7946 0958", DialRules(allow_international=True)) == "0011442079460958"
+    assert normalize_number("0491 570 156", DialRules(dial_format="e164")) == "+61491570156"
+    assert normalize_number("13 13 13", DialRules(allow={"shared_cost"})) == "131313"
+    with pytest.raises(ValueError):
+        normalize_number("0491 570 156", DialRules(block_pattern=r"04\d+"))
+    # Emergency numbers are refused even when the settings would allow everything.
+    for emergency in ("000", "112", "911"):
+        with pytest.raises(ValueError):
+            normalize_number(emergency, DialRules(allow_pattern=r"\+?\d+", extensions=r"\d+"))
 
 
 def test_framing_roundtrip():
