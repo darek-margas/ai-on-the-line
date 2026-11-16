@@ -124,7 +124,8 @@ def summarize(call: dict, base_url: str) -> dict:
     }
 
 
-def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, dialog: Dialog, ari: Ari) -> MCPServer:
+def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, dialog: Dialog, ari: Ari,
+              inbound_dialog: Dialog | None = None) -> MCPServer:
     mcp = MCPServer("ai-on-the-line", instructions=INSTRUCTIONS)
     base_url = os.environ.get("PUBLIC_URL", f"http://localhost:{cfg.http_port}").rstrip("/")
 
@@ -269,6 +270,16 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         )
         if turn:
             results["dialog_reply"] = turn.say
+        if inbound_dialog is not None and inbound_dialog is not dialog:
+            # Incoming calls use their own model (INBOUND_DIALOG_LLM): test that one too.
+            results["inbound_dialog_llm"] = cfg.inbound_dialog_llm
+            await timed("inbound_dialog_llm_load", inbound_dialog.warm_up())
+            turn = await timed(
+                "inbound_dialog_llm_turn",
+                inbound_dialog.next_turn(brief, [("agent", "Hi, do you have a room tonight?"), ("callee", "Yes, one double left.")], {}, "The callee just spoke."),
+            )
+            if turn:
+                results["inbound_dialog_reply"] = turn.say
         return results
 
     # Status page
@@ -713,9 +724,13 @@ async def main() -> None:
     db.fail_unfinished_calls()
     speech = Speech(cfg.stt, cfg.tts, cfg.stt_language, cfg.tts_voice, cfg.audio_rate, cfg.tts_pronounce)
     dialog = Dialog(cfg.dialog_llm, cfg.owner_name, cfg.ollama_url, cfg.ollama_keep_alive)
+    inbound_dialog = dialog
+    if cfg.inbound_dialog_llm and cfg.inbound_dialog_llm != cfg.dialog_llm:
+        inbound_dialog = Dialog(cfg.inbound_dialog_llm, cfg.owner_name, cfg.ollama_url, cfg.ollama_keep_alive)
+    log.info("in-call model: %s, incoming calls: %s", cfg.dialog_llm, cfg.inbound_dialog_llm or cfg.dialog_llm)
     ari = Ari(cfg.ari_url, cfg.ari_user, cfg.ari_password)
-    manager = CallManager(cfg, db, speech, dialog, ari)
-    mcp = build_app(cfg, manager, db, speech, dialog, ari)
+    manager = CallManager(cfg, db, speech, dialog, ari, inbound_dialog)
+    mcp = build_app(cfg, manager, db, speech, dialog, ari, inbound_dialog)
     log.info("call approval: %s", cfg.call_approval)
     global APPROVALS
     APPROVALS = cfg.call_approval != "off"
@@ -725,7 +740,8 @@ async def main() -> None:
 
     audiosocket = await asyncio.start_server(manager.handle_audiosocket, *cfg.audiosocket_bind)
     log.info("AudioSocket listening on %s:%s", *cfg.audiosocket_bind)
-    preload = asyncio.create_task(dialog.preload())  # Ollama only; runs in the background
+    # Ollama only; runs in the background. Keep the tasks referenced so they aren't collected.
+    preloads = [asyncio.create_task(d.preload()) for d in dict.fromkeys((dialog, inbound_dialog))]  # noqa: F841
     app = mcp.streamable_http_app(host=cfg.http_host)
     if cfg.api_token or cfg.approval_token:
         global SIGN_OUT

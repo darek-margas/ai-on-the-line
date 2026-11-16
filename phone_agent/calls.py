@@ -101,11 +101,13 @@ class CallState:
 
 
 class CallManager:
-    def __init__(self, cfg: Config, db: Database, speech: Speech, dialog: Dialog, ari: Ari):
+    def __init__(self, cfg: Config, db: Database, speech: Speech, dialog: Dialog, ari: Ari,
+                 inbound_dialog: Dialog | None = None):
         self.cfg = cfg
         self.db = db
         self.speech = speech
         self.dialog = dialog
+        self.inbound_dialog = inbound_dialog or dialog  # INBOUND_DIALOG_LLM, if set
         self.ari = ari
         self.ami = Ami(cfg.ami_url, cfg.ami_user, cfg.ami_password) if cfg.ami_url else None
         self.calls: dict[str, CallState] = {}
@@ -270,7 +272,7 @@ class CallManager:
     async def _watch_inbound(self, call: CallState) -> None:
         # Warm up while our greeting plays, so their first answer isn't slow.
         try:
-            await asyncio.gather(self.dialog.warm_up(call.brief), self.speech.transcribe(bytes(self.speech.rate)))
+            await asyncio.gather(self.inbound_dialog.warm_up(call.brief), self.speech.transcribe(bytes(self.speech.rate)))
         except Exception:
             log.warning("call %s: warm-up failed", call.id, exc_info=True)
         try:
@@ -412,7 +414,7 @@ class CallManager:
             reader,
             writer,
             self.speech,
-            self.dialog,
+            self.inbound_dialog if inbound else self.dialog,
             max_call_seconds=self.cfg.inbound_max_seconds if inbound else self.cfg.max_call_seconds,
             hold_timeout_seconds=self.cfg.hold_timeout_seconds,
             barge_in=self.cfg.barge_in,

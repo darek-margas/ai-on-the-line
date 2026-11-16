@@ -53,6 +53,8 @@ Names Piper says wrongly can be respelled: `TTS_PRONOUNCE=Siobhan=Shivawn,Nguyen
 
 `DIALOG_LLM=ollama:<model>` uses a local model through `OLLAMA_URL`. Replies stream either way. A smaller model is fast enough but follows the conversation less well. With gemma4 e4b I saw it ask a question that had just been answered.
 
+`INBOUND_DIALOG_LLM` gives incoming calls their own model, in the same format. Outgoing calls are the hard ones: menus, hold queues, someone who answers a different question. The screener only asks one follow-up at a time and never commits to anything, so a cheaper or local model does the job. I run Sonnet outbound and Haiku on the screener. Left empty, incoming calls use `DIALOG_LLM`. `check_setup` tests both models.
+
 The model has to be in memory before a call. Loading one from disk takes from several seconds to minutes, and a caller won't wait that long. So:
 
 - The agent asks Ollama which models are loaded (`/api/ps`) when the container starts, and loads its model if it isn't there. If Ollama isn't reachable yet, it tries again every minute.

@@ -48,8 +48,8 @@ async def fake_pbx(port: int, call_id: str, received: list[int]):
 async def test_inbound_call_greets_first_then_converses(tmp_path):
     cfg = make_config(tmp_path)
     db = Database(cfg.data_dir)
-    dialog = FakeDialog()
-    manager = CallManager(cfg, db, FakeSpeech(), dialog, None)
+    dialog, inbound_dialog = FakeDialog(), FakeDialog()  # INBOUND_DIALOG_LLM set
+    manager = CallManager(cfg, db, FakeSpeech(), dialog, None, inbound_dialog)
     server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
 
     import phone_agent.vad as vad
@@ -77,6 +77,8 @@ async def test_inbound_call_greets_first_then_converses(tmp_path):
     assert saved["transcript"][0][1] == call.brief.opening_line
     # It said goodbye but left hanging up to the caller.
     assert ass.KIND_HANGUP not in received
+    # The incoming call talked through its own model, not the outgoing one.
+    assert inbound_dialog.calls and not dialog.calls
 
 
 @pytest.mark.asyncio
