@@ -417,6 +417,7 @@ class CallManager:
             self.inbound_dialog if inbound else self.dialog,
             max_call_seconds=self.cfg.inbound_max_seconds if inbound else self.cfg.max_call_seconds,
             hold_timeout_seconds=self.cfg.hold_timeout_seconds,
+            max_hold_seconds=self.cfg.max_hold_seconds,
             barge_in=self.cfg.barge_in,
             send_dtmf=send_dtmf,
         )

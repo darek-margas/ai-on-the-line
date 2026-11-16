@@ -175,17 +175,86 @@ def opening_lines(opening: str) -> list[str]:
 SOUND_WORDS = {"beep", "beeps", "bleep", "ring", "ringing", "rings", "music", "tone", "tones", "ding", "dong", "click", "buzz", "silence", "you"}
 
 
+# Queue announcements, in the words Australian call centres use.
+QUEUE_PHRASE = (
+    r"your call is important|in the queue|you are (caller )?number \w+|(stay|remain) on the line|"
+    r"all (of )?our [\w ]{0,30}?are (currently )?(busy|assisting|helping|on other calls|unavailable)|"
+    r"answered in the order|next available|(estimated|expected|current) wait(ing)? time|"
+    r"with you shortly|calls (may|are) (be )?(monitored|recorded)|apologi[sz]e for the (wait|delay)"
+)
 HOLD_PHRASE = re.compile(
     r"please (hold|wait)|\bhold (on|the line)\b|transferring|putting you through|connecting you|"
-    r"one moment|just a moment|in the queue|your call is important",
+    r"one moment|just a moment|" + QUEUE_PHRASE,
     re.I,
 )
+# A repeated recording is only skipped when it's long enough to be sure, and
+# never when it's a menu: a menu repeats because it wants an answer.
+REPEAT_MIN_WORDS = 8
+REPEAT_MATCH = 0.7
+MENU_WORDS = re.compile(r"\bpress\b|\boption\b|\bsay\b|\bdial\b|\benter\b|\bkey\b", re.I)
+
+
+def _words(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9']+", text.lower())
+
+
+def is_repeat(text: str, earlier: list[str]) -> bool:
+    """A hold message playing again: most of these words, in order, were already
+    heard. A person doesn't say the same long sentence twice word for word; a
+    hold loop always does, though speech recognition may split it differently."""
+    words = _words(text)
+    if len(words) < REPEAT_MIN_WORDS or MENU_WORDS.search(text):
+        return False
+    history = [w for line in earlier for w in _words(line)]
+    if len(history) < REPEAT_MIN_WORDS:
+        return False
+    # Count the words covered by three-word runs heard before. Runs, because
+    # short common words match anywhere; any order, because the loop may be
+    # picked up mid-message and split differently each time.
+    seen = {tuple(history[i:i + 3]) for i in range(len(history) - 2)}
+    covered = [False] * len(words)
+    for i in range(len(words) - 2):
+        if tuple(words[i:i + 3]) in seen:
+            covered[i:i + 3] = [True] * 3
+    return sum(covered) / len(words) >= REPEAT_MATCH
+
+
+# Promotions played in a queue, often phrased as questions that aren't for us.
+PROMO_PHRASE = re.compile(
+    r"did you know (that )?(we|you can|our|now)|have you (seen|tried|heard about|checked out) our|"
+    r"(visit|check out|download|try|find us on) (our|the) [\w ]{0,20}?(website|app|online)|"
+    r"\bwhy not\b|don'?t forget (to|that)|(we|now) (now )?(also )?(sell|stock|offer) |"
+    r"you can (now |also )+\w+|(new|latest|special|great) (offers?|deals?|range|products?)|"
+    r"\b(go to|head to|visit) \w+\.(com|net|org)|terms and conditions apply",
+    re.I,
+)
+# What Whisper writes for music it can't make out: these are hold music, not a person.
+MUSIC_HALLUCINATION = re.compile(r"thanks? (you )?for watching|subtitles by|please subscribe|\[?music\]?", re.I)
 
 
 def is_hold_sound(text: str) -> bool:
-    """'Beep. Beep.' / 'Music.': Whisper's name for hold tones, not words."""
+    """'Beep. Beep.' / 'Music.' / '♪♪': Whisper's name for hold tones and music, not words."""
+    if text.strip() and not re.search(r"[a-z0-9]", text, re.I):
+        return True  # only symbols, e.g. "♪ ♪"
     words = re.findall(r"[a-z0-9']+", text.lower())
     return bool(words) and all(w in SOUND_WORDS for w in words)
+
+
+RECORDING_MIN_WORDS = 15
+
+
+def sounds_recorded(text: str) -> bool:
+    """In a queue, a long polished line with no one introducing themselves is a
+    recording. People pick up short: "Hello?", "Sam speaking", the business name.
+    Menus are excluded: they want an answer."""
+    return (len(_words(text)) >= RECORDING_MIN_WORDS and not PERSON_CUE.search(text)
+            and not MENU_WORDS.search(text))
+
+
+def is_promo(text: str) -> bool:
+    """A recorded promotion ("Did you know we now sell tyres?"), with nothing in
+    it that sounds like a person picking up."""
+    return bool(PROMO_PHRASE.search(text)) and not PERSON_CUE.search(text)
 
 
 def answered_after_menu(text: str) -> bool:
@@ -240,6 +309,7 @@ class CallSession:
         hold_timeout_seconds: int,
         barge_in: bool,
         send_dtmf=None,
+        max_hold_seconds: int = 1800,
     ):
         self.call = call
         self.send_dtmf = send_dtmf  # real keypad events (AMI); in-band tones if None
@@ -249,6 +319,12 @@ class CallSession:
         self.dialog = dialog
         self.max_call_seconds = max_call_seconds
         self.hold_timeout_seconds = hold_timeout_seconds
+        # Time on hold doesn't count against max_call_seconds; this caps it instead.
+        self.max_hold_seconds = max_hold_seconds
+        self._hold_started: float | None = None
+        self._held_seconds = 0.0
+        # What they've said since we last spoke, to recognise a looping hold message.
+        self._heard_since_we_spoke: list[str] = []
         self.barge_in = barge_in
 
         # Everything inside the session runs at the speech rate; Asterisk converts
@@ -278,7 +354,7 @@ class CallSession:
         self._last_said_at = 0.0
         # Put on hold or being transferred: hold tones get no reply and no filler,
         # and the next person to speak gets our introduction at once.
-        self._on_hold = False
+        self._on_hold_flag = False
         self._farewell_said = False  # incoming calls: we said goodbye and wait for them to hang up
         self._streamed_at = 0.0  # when the current reply's first streamed sentence went out
         # They often pause mid-thought ("...back in two weeks." ... "so I can't help
@@ -345,7 +421,13 @@ class CallSession:
         answered = first is None
         pending_event = None
         while True:
-            remaining = self.max_call_seconds - (time.monotonic() - started)
+            if self._on_hold and time.monotonic() - self._hold_started >= self.max_hold_seconds:
+                log.info("call %s: on hold for %d s, giving up", call.id, self.max_hold_seconds)
+                call.notes.append(f"Gave up after {self.max_hold_seconds // 60} minutes on hold.")
+                call.set_outcome("time_limit")
+                return
+            # Time on hold is added back: a long queue mustn't use up the conversation.
+            remaining = self.max_call_seconds + self._hold_total() - (time.monotonic() - started)
             if remaining <= 0:
                 if inbound:
                     await self._say(f"Sorry, I have to go now. I'll pass all this on to {call.owner}. Bye!")
@@ -373,6 +455,7 @@ class CallSession:
                     continue
                 if not text:
                     continue
+                self._heard_since_we_spoke.append(text)  # a hold message may loop from here
                 item = None  # already transcribed: let the dialog look at it
                 event = "The call was just answered; their first words are at the end of the conversation."
                 turn_ready = True
@@ -459,6 +542,21 @@ class CallSession:
                     # Hold tones ("Beep."): nothing to answer.
                     self._on_hold = True
                     continue
+                if self._on_hold and not self._introduced() and (is_promo(joined) or sounds_recorded(joined) or all(MUSIC_HALLUCINATION.fullmatch(h.strip(" .!")) for h in said)):
+                    # In the queue, before anyone has heard our opening: an ad for their
+                    # website or Whisper's caption for music. Stay on hold. (Once we've
+                    # introduced ourselves, the model decides: it may be the person back.) A person coming back says who they are or asks
+                    # how they can help, and that doesn't match.
+                    log.info("call %s: recording, promotion or music while on hold, ignored", call.id)
+                    self._heard_since_we_spoke.extend(said)
+                    continue
+                if is_repeat(joined, self._heard_since_we_spoke):
+                    # The same hold message again while we stayed quiet: a recording.
+                    # No reply, and no model turn spent deciding to stay silent.
+                    log.info("call %s: hold message repeated, staying on hold", call.id)
+                    self._on_hold = True
+                    continue
+                self._heard_since_we_spoke.extend(said)
                 after_hold = self._on_hold and not self._introduced()
                 if (self._just_pressed() or after_hold) and answered_after_menu(joined):
                     # "Harvey Norman Moore Park" right after our key press, even garbled
@@ -468,6 +566,7 @@ class CallSession:
                     self._on_hold = False
                     await self._say(opening_lines(call.brief.opening_line)[asks_how_we_are(joined)])
                     continue
+                was_on_hold = self._on_hold
                 if HOLD_PHRASE.search(joined):
                     self._on_hold = True  # "Transferring you now": the dialog may thank them, no filler
                 elif not RECORDING_HINT.search(joined):
@@ -511,6 +610,12 @@ class CallSession:
                     )
                 else:
                     event = "The callee just spoke (their latest words are at the end of the conversation)."
+                    if was_on_hold and not PERSON_CUE.search(joined):
+                        event += (
+                            " You were on hold, so this may well be another recording: announcements and "
+                            "promotions phrased as questions aren't for you. Stay silent unless a person is "
+                            "clearly talking to you."
+                        )
                     # No "Let me think." into a hold queue, or over someone who
                     # trailed off ("I think it was just the...") and may go on.
                     they_spoke = not self._on_hold and not sounds_unfinished(said[-1])
@@ -784,9 +889,28 @@ class CallSession:
             self._heard_over_us = bool(overlapped_line)
         return text
 
+    @property
+    def _on_hold(self) -> bool:
+        return self._on_hold_flag
+
+    @_on_hold.setter
+    def _on_hold(self, value: bool) -> None:
+        # Track time on hold: it's added back to the call's time limit.
+        if value and not self._on_hold_flag:
+            self._hold_started = time.monotonic()
+        elif not value and self._on_hold_flag and self._hold_started is not None:
+            self._held_seconds += time.monotonic() - self._hold_started
+            self._hold_started = None
+        self._on_hold_flag = value
+
+    def _hold_total(self) -> float:
+        current = time.monotonic() - self._hold_started if self._on_hold_flag and self._hold_started else 0.0
+        return self._held_seconds + current
+
     async def _say(self, text: str) -> None:
         """Start speaking as soon as the first sentence is rendered; the rest is
         rendered while that plays."""
+        self._heard_since_we_spoke = []
         self.call.add_transcript("agent", text)
         self._speaking_line = text
         self._last_said_at = time.monotonic()
@@ -812,6 +936,7 @@ class CallSession:
         log.info("call %s: TTS %.0f ms (%d chars)", self.call.id, (time.monotonic() - t0) * 1000, len(sentence))
         log.debug("call %s: saying %r", self.call.id, sentence)
         if first:
+            self._heard_since_we_spoke = []
             self.call.add_transcript("agent", sentence)
             self._speaking_line = sentence
             self._last_said_at = time.monotonic()

@@ -150,8 +150,9 @@ Logs at `LOG_LEVEL=INFO` have timings only. `DEBUG` also logs what was said on e
 
 - `MAX_CONCURRENT_CALLS` (default 1): outgoing calls run one at a time, extra ones queue.
 - `MAX_INBOUND_CALLS` (default 1): one screened call at a time. Further callers hear the PBX's fallback.
-- `MAX_CALL_SECONDS` and `INBOUND_MAX_SECONDS`: hard limits per call.
-- `HOLD_TIMEOUT_SECONDS`: how long it waits on hold before giving up.
+- `MAX_CALL_SECONDS` and `INBOUND_MAX_SECONDS`: hard limits per call. Time an outgoing call spends on hold isn't counted, so a long queue doesn't cut the conversation short once someone answers.
+- `MAX_HOLD_SECONDS` (1800): the longest it stays in a hold queue before giving up.
+- `HOLD_TIMEOUT_SECONDS`: how long a completely silent line is tolerated before it hangs up.
 
 ---
 

@@ -95,6 +95,9 @@ class Config:
     approval_token: str = ""
     approved_numbers: list[str] = field(default_factory=list)
     approval_hours: float = 24.0  # an unapproved call is dropped this long after it was due
+    # Longest time on hold (queue music and messages) before giving up. Hold time
+    # doesn't count against max_call_seconds.
+    max_hold_seconds: int = 1800
     # In-call LLM for incoming calls, same format as dialog_llm. Empty = use dialog_llm.
     inbound_dialog_llm: str = ""
 
@@ -145,6 +148,7 @@ class Config:
             screener_recording_notice=_env("SCREENER_RECORDING_NOTICE", "true").lower() == "true",
             dial_rules=_dial_rules(),
             inbound_dialog_llm=_env("INBOUND_DIALOG_LLM", "").strip(),
+            max_hold_seconds=int(_env("MAX_HOLD_SECONDS", "1800")),
             **_approval(),
         )
 

@@ -829,3 +829,105 @@ def test_ollama_preload_loads_only_when_needed():
     assert run(["gemma4:e4b"]) == ["/api/ps"]
     assert run([], fail_first=True) == ["/api/ps", "/api/ps", "/api/generate"]
     assert asyncio.run(Dialog("claude:x", "Alex", "", "-1").preload()) is None  # nothing to do
+
+
+def test_queue_announcements_are_hold_messages():
+    from phone_agent.session import HOLD_PHRASE
+    for text in [
+        "All our consultants are currently busy. Please stay on the line.",
+        "You are caller number four.",
+        "All of our customer service team members are currently assisting other customers.",
+        "Calls may be monitored or recorded for training purposes.",
+        "Your estimated wait time is twelve minutes.",
+        "We apologise for the delay, we'll be with you shortly.",
+    ]:
+        assert HOLD_PHRASE.search(text), text
+    for text in ["Hi, Sarah speaking, how can I help?", "Yes, we have one in stock, it's about two hundred dollars."]:
+        assert not HOLD_PHRASE.search(text), text
+
+
+def test_repeated_hold_message():
+    from phone_agent.session import is_repeat
+    loop = "Thank you for calling. All our consultants are currently busy. Your call is important to us, please stay on the line."
+    assert is_repeat(loop, [loop])
+    # Picked up mid-message, or split differently by speech recognition.
+    assert is_repeat("Your call is important to us, please stay on the line. Thank you for calling.", [loop])
+    assert is_repeat("Thank you for calling. All our consultants are currently busy.",
+                     ["Thank you for calling.", "All our consultants are currently busy. Your call is important to us."])
+    # Not a repeat: something new, a short line, or a menu (it repeats because it wants a key).
+    assert not is_repeat("Yes, we have the family room available that night for two hundred.",
+                         ["We have a family room that sleeps five, two hundred and ten a night."])
+    assert not is_repeat("Hello? Hello?", ["Hello? Hello?"])
+    menu = "We didn't detect any input from you. For sales, press 1. For service, press 2."
+    assert not is_repeat(menu, [menu])
+
+
+@pytest.mark.asyncio
+async def test_looping_hold_message_skips_the_model(tmp_path):
+    """A call-centre queue: the same announcement every half minute. After the
+    first time it never reaches the model, and the person who finally answers
+    gets the opening at once."""
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    loop = "Thank you for calling. All our consultants are currently busy. Your call is important to us."
+    speech = ScriptedSpeech([
+        loop,
+        "Beep.",
+        loop,
+        "Your call is important to us. Thank you for calling.",
+        "Hi, Sam speaking.",
+        "Yes, that plan includes international calls.",
+    ])
+    dialog = ScriptedDialog([
+        Turn(),  # the announcement the first time: stay quiet
+        Turn(say="Great, thanks. Bye!", answers={"international": "yes"}, end_call=True, outcome="completed"),
+    ])
+    manager = CallManager(cfg, db, speech, dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    ari = BurstAri(server.sockets[0].getsockname()[1], [250, 25, 250, 250, 25, 25])
+    manager.ari = ari
+
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    try:
+        brief = Brief(goal="Plan question", callee="Telco", opening_line="Hi, I'm Alex's assistant, with a question about a plan.",
+                      questions={"international": "does the plan include international calls"})
+        call = manager.start_call("0255500000", brief)
+        await asyncio.wait_for(call.done.wait(), 60)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+
+    saved = db.get_call(call.id)
+    agent = [text for who, text in saved["transcript"] if who == "agent"]
+    assert agent == [brief.opening_line, "Great, thanks. Bye!"], saved["transcript"]
+    assert dialog.calls == 2  # the first announcement and the answer; not the repeats
+    assert saved["outcome"] == "completed"
+
+
+def test_queue_promotions_and_music():
+    from phone_agent.session import is_hold_sound, is_promo
+    for text in [
+        "Did you know we now sell tyres?",
+        "Have you seen our new offer on the website?",
+        "Why not download our app and skip the queue?",
+        "You can now manage your account online at telstra.com.",
+        "Visit our website for our latest deals. Terms and conditions apply.",
+    ]:
+        assert is_promo(text), text
+    for text in [
+        "Hi, Sam speaking, how can I help?",
+        "Yes, we have that one in stock.",
+        "Did you get my email?",
+    ]:
+        assert not is_promo(text), text
+    assert is_hold_sound("♪ ♪") and is_hold_sound("[Music]") and not is_hold_sound("Hello?")
+
+
+def test_long_lines_in_a_queue_sound_recorded():
+    from phone_agent.session import sounds_recorded
+    assert sounds_recorded("We're experiencing higher than normal call volumes at the moment, and we appreciate your patience while you wait.")
+    assert not sounds_recorded("You've reached McDonald's Caringbah, Jane speaking, how can I help you today?")
+    assert not sounds_recorded("Hello?")
+    assert not sounds_recorded("For accounts and billing press 1, for technical support press 2, for anything else please stay on the line.")
