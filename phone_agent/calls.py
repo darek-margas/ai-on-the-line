@@ -20,7 +20,7 @@ from .db import Database
 from .dialog import Brief, Dialog
 from .dialing import normalize_number
 from .inbound import PROFILES
-from .session import FILLERS, CallSession, opening_lines, split_sentences
+from .session import FILLERS, RECORDING_NOTICE, CallSession, opening_lines, split_sentences
 from .speech import Speech
 
 log = logging.getLogger(__name__)
@@ -115,9 +115,11 @@ class CallManager:
         self._tasks: set[asyncio.Task] = set()
 
     def start_call(self, phone: str, brief: Brief, run_at: float | None = None, zone: str | None = None,
-                   ignore_hours: bool = False, approved_by: str | None = None) -> CallState:
+                   ignore_hours: bool = False, approved_by: str | None = None,
+                   max_seconds: int | None = None) -> CallState:
         """Queue an outgoing call. It may first wait for the owner's approval
-        (CALL_APPROVAL) and for run_at. approved_by: who already approved it."""
+        (CALL_APPROVAL) and for run_at. approved_by: who already approved it.
+        max_seconds: this call's time limit, if not MAX_CALL_SECONDS."""
         number = normalize_number(phone, self.cfg.dial_rules)  # refuse before queueing
         why = approved_by or self.auto_approval(number)
         call = CallState(id=str(uuid.uuid4()), phone=phone, brief=brief, owner=self.cfg.owner_name, db=self.db)
@@ -127,6 +129,7 @@ class CallManager:
             "ignore_hours": ignore_hours,
             "approval": "not_needed" if why else "needed",
             "approval_note": why or "",
+            "max_seconds": max_seconds,
         }
         call.status = "awaiting_approval" if not why else "scheduled" if run_at and run_at > time.time() else "queued"
         self.calls[call.id] = call
@@ -326,7 +329,8 @@ class CallManager:
                     await self.speech.transcribe(bytes(self.speech.rate))  # 0.5 s of silence
                 except Exception:
                     log.warning("call %s: warm-up failed, calling anyway", call.id, exc_info=True)
-                for line in opening_lines(call.brief.opening_line) + FILLERS:
+                notice = [RECORDING_NOTICE] if call.brief.recording_notice else []
+                for line in opening_lines(call.brief.opening_line) + FILLERS + notice:
                     for sentence in split_sentences(line):  # as _say will ask for them
                         await self.speech.synthesize(sentence)
                 if call.outcome == "hung_up_by_owner":
@@ -418,7 +422,8 @@ class CallManager:
             writer,
             self.speech,
             self.inbound_dialog if inbound else self.dialog,
-            max_call_seconds=self.cfg.inbound_max_seconds if inbound else self.cfg.max_call_seconds,
+            max_call_seconds=(self.cfg.inbound_max_seconds if inbound
+                              else call.schedule.get("max_seconds") or self.cfg.max_call_seconds),
             hold_timeout_seconds=self.cfg.hold_timeout_seconds,
             max_hold_seconds=self.cfg.max_hold_seconds,
             barge_in=self.cfg.barge_in,

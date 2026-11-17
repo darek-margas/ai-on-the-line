@@ -80,6 +80,11 @@ BARGE_IN_CONFIRM_SECONDS = 1.5
 
 
 HOW_ARE_YOU_REPLY = "I'm good, thanks for asking!"
+# Their recorded announcement says the call is recorded: their machine tells us,
+# we tell their machine (brief.recording_notice). Pre-rendered, no model turn,
+# so it lands on their recording right after their own notice.
+RECORDING_NOTICE = "This call is being recorded on our side as well."
+HEARD_RECORDING_NOTICE = re.compile(r"\bcalls?\b[^.?!]{0,40}\brecorded\b|\brecording (this|your|the) call", re.I)
 RECORDING_HINT = re.compile(
     r"\bpress\b|thank(s| you) for calling|welcome to|your call is|open until|opening hours|"
     r"please (hold|wait|stay)|voicemail|leave a message|not available|after the (tone|beep)",
@@ -243,6 +248,18 @@ PROMO_PHRASE = re.compile(
 MUSIC_HALLUCINATION = re.compile(r"thanks? (you )?for watching|subtitles by|please subscribe|\[?music\]?", re.I)
 
 
+# What Whisper makes of hold music, besides SOUND_WORDS: "Music Music Thank you.",
+# "The The The The".
+HOLD_NOISE_WORDS = SOUND_WORDS | {"thank", "thanks", "cheers", "the"}
+
+
+def hold_noise(text: str) -> bool:
+    """Whisper's captions for music in a queue: nothing a person said."""
+    words = re.findall(r"[a-z0-9']+", text.lower())
+    return (is_hold_sound(text) or bool(MUSIC_HALLUCINATION.fullmatch(text.strip(" .!")))
+            or (bool(words) and all(w in HOLD_NOISE_WORDS for w in words)))
+
+
 def is_hold_sound(text: str) -> bool:
     """'Beep. Beep.' / 'Music.' / '♪♪': Whisper's name for hold tones and music, not words."""
     if text.strip() and not re.search(r"[a-z0-9]", text, re.I):
@@ -274,8 +291,8 @@ def answered_after_menu(text: str) -> bool:
     words = re.findall(r"[a-z0-9']+", text.lower())
     if not 1 <= len(words) <= 8 or THANKS_ONLY.match(text.strip()):
         return False
-    if all(w in SOUND_WORDS for w in words):
-        return False  # Whisper's name for a ringtone or hold music ("Beep."), not a person
+    if hold_noise(text):
+        return False  # Whisper's name for a ringtone or hold music ("Beep.", "Music. Thank you."), not a person
     return not (RECORDING_HINT.search(text) or re.search(r"\b(press|option|hold|transfer|connecting|queue|menu)\b", text, re.I))
 
 
@@ -349,6 +366,7 @@ class CallSession:
         # The call opened with a recorded-sounding greeting: wait a moment to see
         # whether the recording carries on or a person is waiting for us.
         self._greeting_pause = False
+        self._notice_given = False  # our recording notice, said once to their machine
         self.barge_in = barge_in
 
         # Everything inside the session runs at the speech rate; Asterisk converts
@@ -510,6 +528,7 @@ class CallSession:
                     continue
                 if not text:
                     continue
+                await self._recording_notice(text)
                 self._heard_since_we_spoke.append(text)  # a hold message may loop from here
                 if recorded_greeting(text):
                     # "Hi, welcome to Optus Sales.": likely a recording with more to come.
@@ -609,6 +628,7 @@ class CallSession:
                     continue
                 said = [h for h in heard if h]
                 joined = " ".join(said)
+                await self._recording_notice(joined)
                 self._farewell_said = False  # they're still talking to us
                 if all(is_hold_sound(h) for h in said):
                     # Hold tones ("Beep."): nothing to answer.
@@ -616,7 +636,7 @@ class CallSession:
                     continue
                 if self._on_hold and not self._introduced() and (
                     is_promo(joined) or sounds_recorded(joined)
-                    or all(MUSIC_HALLUCINATION.fullmatch(h.strip(" .!")) or THANKS_ONLY.match(h.strip()) for h in said)
+                    or all(hold_noise(h) for h in said)
                 ):
                     # In the queue, before anyone has heard our opening: an ad for their
                     # website or Whisper's caption for music (a lone "Thank you." is its
@@ -898,6 +918,17 @@ class CallSession:
             if who == "callee" and PERSON_CUE.search(text):
                 return True
         return False
+
+    async def _recording_notice(self, text: str) -> None:
+        """Their recorded announcement says the call is recorded: say ours is
+        too, once, before we've introduced ourselves. Only to a machine: a person
+        who mentions recording gets an honest answer from the model if they ask."""
+        brief = self.call.brief
+        if (brief.recording_notice and brief.direction != "inbound" and not self._notice_given
+                and not self._introduced() and HEARD_RECORDING_NOTICE.search(text) and not PERSON_CUE.search(text)):
+            self._notice_given = True
+            log.info("call %s: their announcement says the call is recorded; saying ours is too", self.call.id)
+            await self._say(RECORDING_NOTICE)
 
     def _introduced(self) -> bool:
         """We've said our opening line. A hold after that is them checking

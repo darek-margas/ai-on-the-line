@@ -85,6 +85,9 @@ class Config:
     credit_voice: str = "Jenny (Dioco)"
     # The call screener tells callers the call is recorded (in its greeting).
     screener_recording_notice: bool = True
+    # Outgoing calls: when their recorded announcement says the call is recorded,
+    # say ours is too (per call: place_call's recording_notice).
+    recording_notice: bool = False
     # Which numbers may be dialled (DIAL_* settings; see docs/dialling.md).
     dial_rules: DialRules = field(default_factory=DialRules)
     # Who approves outgoing calls (see SECURITY.md). "off": they dial at once.
@@ -146,6 +149,7 @@ class Config:
             export_spoken_credit=_env("EXPORT_SPOKEN_CREDIT", "true").lower() == "true",
             credit_voice=_env("CREDIT_VOICE", "Jenny (Dioco)"),
             screener_recording_notice=_env("SCREENER_RECORDING_NOTICE", "true").lower() == "true",
+            recording_notice=_env("RECORDING_NOTICE", "false").lower() == "true",
             dial_rules=_dial_rules(),
             inbound_dialog_llm=_env("INBOUND_DIALOG_LLM", "").strip(),
             max_hold_seconds=int(_env("MAX_HOLD_SECONDS", "1800")),

@@ -158,7 +158,8 @@ Logs at `LOG_LEVEL=INFO` have timings only. `DEBUG` also logs what was said on e
 
 - `MAX_CONCURRENT_CALLS` (default 1): outgoing calls run one at a time, extra ones queue.
 - `MAX_INBOUND_CALLS` (default 1): one screened call at a time. Further callers hear the PBX's fallback.
-- `MAX_CALL_SECONDS` and `INBOUND_MAX_SECONDS`: hard limits per call. Time an outgoing call spends on hold isn't counted, so a long queue doesn't cut the conversation short once someone answers.
+- `MAX_CALL_SECONDS` and `INBOUND_MAX_SECONDS`: hard limits per call. Time an outgoing call spends on hold isn't counted, so a long queue doesn't cut the conversation short once someone answers. A call that needs longer can ask for up to 60 minutes with `place_call`'s `max_minutes`.
+- `RECORDING_NOTICE`: on outgoing calls, when their recorded announcement says the call is recorded, the agent answers at once with a pre-rendered "This call is being recorded on our side as well." It's said to their recording only: once a person is on the line it never brings it up, and if they ask whether the call is recorded, it says honestly that it is. `place_call`'s `recording_notice` sets it per call. Leave it off if you don't record calls.
 - `MAX_HOLD_SECONDS` (1800): the longest it stays in a hold queue before giving up.
 - `HOLD_TIMEOUT_SECONDS`: how long a completely silent line is tolerated before it hangs up.
 

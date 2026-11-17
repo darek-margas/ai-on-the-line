@@ -111,7 +111,7 @@ def test_screener_uses_the_inbound_prompt():
 
     dialog._ask_ollama = fake_ask
     asyncio.run(dialog.next_turn(brief, [("callee", "Hello")], {}, "event"))
-    assert captured["system"] != SYSTEM_PROMPT.format(owner="Alex", must_not="")
+    assert captured["system"] != SYSTEM_PROMPT.format(owner="Alex", must_not="", recording="")
     assert "answering a live phone call" in captured["system"]
     assert "Caller: Hello" in captured["user"]
 

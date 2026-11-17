@@ -30,6 +30,7 @@ from .sample import call_sample
 from .speech import Speech
 
 log = logging.getLogger(__name__)
+MAX_CALL_MINUTES = 60  # longest time limit place_call may ask for
 
 # Required by the additional term in NOTICE (AGPL section 7(b)): keep this credit
 # in the footer. If you run a modified version for others, set SOURCE_URL to
@@ -142,6 +143,8 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         callee_timezone: str | None = None,
         ignore_calling_hours: bool = False,
         run_at: str | None = None,
+        max_minutes: int | None = None,
+        recording_notice: bool | None = None,
     ) -> dict:
         """Start a phone call. Returns a call_id immediately; poll get_call for the result.
 
@@ -157,10 +160,13 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             callee_timezone: IANA zone if the callee isn't in the default zone, for the calling-hours check.
             ignore_calling_hours: Only for test calls to the owner's own phone.
             run_at: Place the call later: local time in the callee's timezone, "2026-11-20 09:30". Up to 30 days ahead.
+            max_minutes: Time limit for this call, if it needs longer than the server's default (MAX_CALL_SECONDS); up to 60. Time on hold isn't counted.
+            recording_notice: When their recorded announcement says the call is recorded, say ours is too (only to the recording, never to a person). Default: the server's RECORDING_NOTICE.
         """
         return start_call(
             phone, callee, goal, opening_line, {q.name: q.description for q in questions},
             may_share, must_not, context, callee_timezone, ignore_calling_hours, run_at,
+            max_minutes=max_minutes, recording_notice=recording_notice,
         )
 
     def start_call(
@@ -176,10 +182,14 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         ignore_calling_hours: bool,
         run_at: str | None = None,
         approved_by: str | None = None,
+        max_minutes: int | None = None,
+        recording_notice: bool | None = None,
     ) -> dict:
         """Shared by the MCP tool and the test-call form."""
         if not questions:
             return {"error": "Give at least one question."}
+        if max_minutes is not None and not 1 <= max_minutes <= MAX_CALL_MINUTES:
+            return {"error": f"max_minutes must be between 1 and {MAX_CALL_MINUTES}."}
         try:
             zone = ZoneInfo(callee_timezone or cfg.timezone)
         except (KeyError, ValueError):
@@ -207,9 +217,11 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             may_share=may_share or [],
             must_not=DEFAULT_MUST_NOT + (must_not or []),
             context=context,
+            recording_notice=cfg.recording_notice if recording_notice is None else recording_notice,
         )
         try:
-            call = manager.start_call(phone, brief, due, zone.key, ignore_calling_hours, approved_by)
+            call = manager.start_call(phone, brief, due, zone.key, ignore_calling_hours, approved_by,
+                                      max_seconds=max_minutes * 60 if max_minutes else None)
         except ValueError as exc:
             return {"error": str(exc)}
         result = {"call_id": call.id, "status": call.status, "page": f"{base_url}/calls/{call.id}"}
