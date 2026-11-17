@@ -391,7 +391,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             # Every download sits next to the player. The recording download carries
             # the credit; the line after it is for pasting under a post.
             audio = (
-                f"<audio controls src='/recordings/{cid}.wav'></audio>"
+                f"<audio id='rec' controls preload='metadata' src='/recordings/{cid}.wav'></audio>{WHOLE_FILE_PLAYER}"
                 f"<p class='downloads'><b>Download</b> "
                 f"<a href='/recordings/{cid}/download.wav'>recording with credit</a> &middot; "
                 f"test sample: <a href='/calls/{cid}/sample.zip?revoice=1'>re-voiced</a> "
@@ -644,6 +644,37 @@ def direction_icon(call: dict) -> str:
     if (call.get("brief") or {}).get("direction") == "inbound":
         return "<span class='dir in' title='Incoming: answered by the agent'>&#8601;</span>"
     return "<span class='dir out' title='Outgoing: placed by the agent'>&#8599;</span>"
+
+
+# Firefox streams a long recording in pieces: it reads ahead, leaves the
+# connection idle and later asks for the rest. Once that second request never
+# went out and playback jumped to the end at 8:06 of a 9:32 call. So the first
+# press of play fetches the whole file and plays it from memory; on the LAN
+# that's under a second. If the fetch fails, the player streams as before.
+WHOLE_FILE_PLAYER = """<span id='rec-loading' class='muted' hidden>Loading the recording&hellip;</span><script>
+(() => {
+  const a = document.getElementById('rec'), note = document.getElementById('rec-loading');
+  let tried = false;
+  a.addEventListener('play', async () => {
+    if (tried) return;
+    tried = true;
+    const at = a.currentTime;
+    a.pause();
+    note.hidden = false;
+    try {
+      const r = await fetch(a.currentSrc || a.src);
+      if (!r.ok) throw new Error(r.status);
+      const url = URL.createObjectURL(await r.blob());
+      a.addEventListener('loadedmetadata', () => { a.currentTime = at; a.play(); }, {once: true});
+      a.src = url;
+    } catch (e) {
+      a.play();
+    } finally {
+      note.hidden = true;
+    }
+  });
+})();
+</script>"""
 
 
 def page(title: str, body: str, refresh: bool = False) -> str:
