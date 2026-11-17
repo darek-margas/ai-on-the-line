@@ -1050,3 +1050,24 @@ async def test_greeting_then_hello_is_a_person(tmp_path):
     agent = [text for who, text in saved["transcript"] if who == "agent"]
     assert agent[0] == brief.opening_line, saved["transcript"]
     assert dialog.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_hours_are_checked_again_before_dialling(tmp_path):
+    """A call that waited for a slot (or warmed up) past the end of calling hours isn't dialled."""
+    cfg = make_config(tmp_path)
+    manager = CallManager(cfg, Database(cfg.data_dir), FakeSpeech(), FakeDialog(), None)
+    dialled = []
+
+    class CountingAri(FakeAri):
+        async def originate(self, *args, **kwargs):
+            dialled.append(args)
+            return "chan-1"
+
+    manager.ari = CountingAri(0)
+    answers = iter([None, "calling hours are 09:00-17:00"])
+    manager.hours_error = lambda *args: next(answers)
+    brief = Brief(goal="g", callee="c", opening_line="Hi.", questions={"q": "q?"})
+    call = manager.start_call("0255500000", brief)
+    await asyncio.wait_for(call.done.wait(), 10)
+    assert dialled == [] and call.status == "failed" and "calling hours" in call.error

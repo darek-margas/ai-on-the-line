@@ -15,6 +15,7 @@ services:
       - "8090:8090"   # MCP (/mcp) and status page (/)
       - "9092:9092"   # AudioSocket, reached by Asterisk
     volumes:
+      # Create it first for the container's user: mkdir -p data && sudo chown 10001 data
       - ./data:/data
       # Optional: FreePBX's /var/spool/asterisk/monitor (the whole folder), for the player,
       # downloads and test samples. Set RECORDINGS_DIR=/recordings in .env.

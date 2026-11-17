@@ -284,11 +284,6 @@ class CallManager:
             call.changed()
             call.done.set()
 
-    def busy(self) -> bool:
-        """A call is being set up or is in progress."""
-        idle = FINAL_STATUSES | PENDING_STATUSES | {"queued"}
-        return any(c.status not in idle for c in self.calls.values())
-
     def get(self, call_id: str) -> dict[str, Any] | None:
         if call_id in self.calls:
             return self.calls[call_id].to_row()
@@ -321,11 +316,7 @@ class CallManager:
             if call.status != "queued":
                 call.status = "queued"
                 call.changed()
-            s = call.schedule
-            late = self.hours_error(call.phone, s.get("zone") or self.cfg.timezone, bool(s.get("ignore_hours")))
-            if late:
-                call.status = "failed"
-                call.error = f"Not dialled: {late}"
+            if self._too_late(call):
                 return
             async with self._slots:
                 # Wake the LLM and Whisper and pre-render both openings before
@@ -340,6 +331,9 @@ class CallManager:
                         await self.speech.synthesize(sentence)
                 if call.outcome == "hung_up_by_owner":
                     return  # cancelled while queued or warming up: never dial
+                # Again: it may have waited a long time for a slot.
+                if self._too_late(call):
+                    return
                 call.status = "dialing"
                 call.changed()
                 number = normalize_number(call.phone, self.cfg.dial_rules)
@@ -369,6 +363,15 @@ class CallManager:
             call.ended = time.time()
             call.changed()
             call.done.set()
+
+    def _too_late(self, call: CallState) -> bool:
+        """Outside calling hours: the call fails instead of dialling."""
+        s = call.schedule
+        late = self.hours_error(call.phone, s.get("zone") or self.cfg.timezone, bool(s.get("ignore_hours")))
+        if late:
+            call.status = "failed"
+            call.error = f"Not dialled: {late}"
+        return bool(late)
 
     async def _wait_connected(self, call: CallState) -> bool:
         """Wait for AudioSocket to connect, or for the channel to vanish (busy / no answer)."""

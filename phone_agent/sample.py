@@ -16,10 +16,10 @@ Two sources:
   Whisper, one line per stretch of speech.
 
 Text is redacted (numbers, email addresses, references, the owner's name).
-The original audio can't be. With --revoice (or the call page's "re-voiced"
-link) every voice is replaced by the TTS voice reading the redacted text at
-the same time and length, so the timing survives and nobody's voice does.
-That's the version to share publicly.
+The original audio can't be, so it stays private. To share a sample, leave the
+audio out (--no-audio, or the call page's "transcript only" link): the
+transcript keeps when each line was said, which is most of what turn-taking
+depends on.
 """
 
 import argparse
@@ -64,15 +64,13 @@ If you contribute this sample to the project, it's shared under CC BY-SA 4.0.
 
 ORIGINAL_AUDIO = """
 The audio is the original recording and is NOT redacted. Keep it private.
-Share it only if everyone on it agreed. For anything public, export a
-re-voiced sample instead.
+Share it only if everyone on it agreed. For anything public, export the
+sample without audio instead.
 """
 
-REVOICED_AUDIO = """
-The audio is re-voiced: every stretch of speech was replaced by the TTS voice
-reading the redacted transcript of it, at the same time, length and
-loudness. Stretches where nothing was recognised became noise. No real voice
-is left, but the words are: read transcript.txt before you share it.
+NO_AUDIO = """
+There is no audio, only the transcript. Read transcript.txt before you share
+it: a name, a street or a company said in plain words isn't redacted.
 """
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
@@ -105,7 +103,7 @@ def _text_files(meta: dict, lines: list[dict]) -> dict[str, bytes]:
 
     txt = "\n".join(f"{stamp(line['t'])} {line['who']}: {line['text']}" for line in lines)
     return {
-        "README.txt": README.format(audio_note=REVOICED_AUDIO if meta.get("revoiced") else ORIGINAL_AUDIO).encode(),
+        "README.txt": README.format(audio_note=ORIGINAL_AUDIO if meta.get("audio") else NO_AUDIO).encode(),
         "transcript.json": json.dumps(meta, indent=2, ensure_ascii=False).encode(),
         "transcript.txt": (txt + "\n").encode(),
     }
@@ -195,26 +193,15 @@ def speech_segments(pcm: np.ndarray, rate: int, min_silence: float = 0.6) -> lis
 
 
 async def recording_sample(path: str, speech, owner: str = "", who: list[str] | None = None,
-                           revoice: bool = False) -> bytes:
+                           audio: bool = True) -> bytes:
     """A zip for a recording made outside the agent: each stretch of speech
     transcribed with Whisper. A stereo file is taken as one side per channel.
-    With revoice, the audio is re-voiced (revoice_track) instead of copied.
-    speech must run at the recording's rate."""
+    speech must run at the recording's rate. The file name stays out of the
+    sample: FreePBX puts both phone numbers in it."""
     channels, rate = _read_wav(path)
     who = who or (["line"] if len(channels) == 1 else [f"channel {c + 1}" for c in range(len(channels))])
     names = owner_names(owner)
     lines = []
-    if revoice:
-        tracks = []
-        for c, pcm in enumerate(channels):
-            track, said = await revoice_track(pcm, rate, speech, names)
-            tracks.append(track)
-            label = who[c] if c < len(who) else f"channel {c + 1}"
-            lines += [{"t": line["t"], "who": label, "text": line["text"]} for line in said]
-        lines.sort(key=lambda line: line["t"])
-        meta = {"source": "PBX recording", "file": os.path.basename(path), "duration": round(len(channels[0]) / rate, 1),
-                "channels": len(channels), "revoiced": True, "audio": ["recording.wav"]}
-        return _zip({**_text_files(meta, lines), "recording.wav": _wav(tracks, rate)})
     for c, pcm in enumerate(channels):
         for start, end in speech_segments(pcm, rate):
             text = await speech.transcribe(pcm[int(start * rate) : int(end * rate)].tobytes())
@@ -222,139 +209,16 @@ async def recording_sample(path: str, speech, owner: str = "", who: list[str] | 
                 lines.append({"t": round(start, 1), "who": who[c] if c < len(who) else f"channel {c + 1}",
                               "text": redact(text, names)})
     lines.sort(key=lambda line: line["t"])
-    with open(path, "rb") as f:
-        audio = f.read()
+    files = {}
+    if audio:
+        with open(path, "rb") as f:
+            files["recording.wav"] = f.read()
     meta = {
         "source": "PBX recording",
-        "file": os.path.basename(path),
         "duration": round(len(channels[0]) / rate, 1),
         "channels": len(channels),
-        "audio": ["recording.wav"],
+        "audio": sorted(files),
     }
-    return _zip({**_text_files(meta, lines), "recording.wav": audio})
-
-
-# What the re-voiced audio says in place of redacted text.
-SPOKEN_TOKENS = {"<number>": "a number", "<email>": "an email address", "<ref>": "a reference", "<owner>": "Alex"}
-
-
-def speakable(text: str) -> str:
-    for token, words in SPOKEN_TOKENS.items():
-        text = text.replace(token, words)
-    return text
-
-
-def stretch(pcm: np.ndarray, length: int, rate: int) -> np.ndarray:
-    """pcm (float) made exactly `length` samples long without changing its
-    pitch: plain overlap-add with 30 ms windows. Rough, but this is a test
-    signal; what matters is that speech starts and stops where it did."""
-    if length <= 0:
-        return np.zeros(0, dtype=np.float32)
-    if len(pcm) == 0:
-        return np.zeros(length, dtype=np.float32)
-    frame = max(int(rate * 0.03), 16)
-    hop_out = frame // 2
-    hop_in = hop_out * len(pcm) / length
-    window = np.hanning(frame).astype(np.float32)
-    out = np.zeros(length + frame, dtype=np.float32)
-    norm = np.zeros(length + frame, dtype=np.float32)
-    padded = np.concatenate([pcm.astype(np.float32), np.zeros(frame, dtype=np.float32)])
-    for k in range(length // hop_out + 1):
-        i_in, i_out = int(k * hop_in), k * hop_out
-        piece = padded[i_in : i_in + frame]
-        if len(piece) < frame:
-            piece = np.pad(piece, (0, frame - len(piece)))
-        out[i_out : i_out + frame] += piece * window
-        norm[i_out : i_out + frame] += window
-    return (out / np.maximum(norm, 1e-3))[:length]
-
-
-def _trim(pcm: np.ndarray, threshold: float = 300) -> np.ndarray:
-    """Leading and trailing near-silence off a synthesized clip."""
-    loud = np.nonzero(np.abs(pcm) > threshold)[0]
-    return pcm[loud[0] : loud[-1] + 1] if len(loud) else pcm[:0]
-
-
-def _rms(x: np.ndarray) -> float:
-    return float(np.sqrt(np.mean(np.square(x.astype(np.float64))))) if len(x) else 0.0
-
-
-async def _retry(fn, arg, attempts: int = 3):
-    """Whisper or Piper sometimes drops a single connection (seen right after a
-    restart); one hiccup shouldn't lose a whole sample."""
-    for i in range(attempts):
-        try:
-            return await fn(arg)
-        except (ConnectionError, OSError):
-            if i == attempts - 1:
-                raise
-            await asyncio.sleep(0.5 * (i + 1))
-
-
-async def revoice_track(pcm: np.ndarray, rate: int, speech, names: list[str]) -> tuple[np.ndarray, list[dict]]:
-    """The same track with every stretch of speech replaced by the TTS voice
-    saying the redacted transcript of it, fitted to the same start, length and
-    loudness. Stretches nothing was recognised in become noise of the same
-    loudness, so the agent's voice detection still sees something there."""
-    out = np.zeros(len(pcm), dtype=np.float32)
-    lines = []
-    rng = np.random.default_rng(0)
-    for start, end in speech_segments(pcm, rate):
-        a, b = int(start * rate), min(int(end * rate), len(pcm))
-        piece = pcm[a:b]
-        level = _rms(piece)
-        text = await _retry(speech.transcribe, piece.tobytes())
-        if text:
-            said = redact(text, names)
-            lines.append({"t": round(start, 1), "text": said})
-            voice = _trim(np.frombuffer(await _retry(speech.synthesize, speakable(said)), dtype=np.int16))
-            fitted = stretch(voice.astype(np.float32), b - a, rate)
-        else:
-            fitted = rng.normal(0, 1, b - a).astype(np.float32)
-        out[a:b] = fitted * (level / max(_rms(fitted), 1.0))
-    return np.clip(out, -32768, 32767).astype(np.int16), lines
-
-
-def _wav(channels: list[np.ndarray], rate: int) -> bytes:
-    n = min(len(c) for c in channels)
-    data = np.stack([c[:n] for c in channels], axis=1).astype(np.int16)
-    out = io.BytesIO()
-    with wave.open(out, "wb") as w:
-        w.setnchannels(len(channels))
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(data.tobytes())
-    return out.getvalue()
-
-
-def _read_wav_bytes(data: bytes) -> tuple[list[np.ndarray], int]:
-    with wave.open(io.BytesIO(data)) as w:
-        rate, channels = w.getframerate(), w.getnchannels()
-        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
-    return [pcm[c::channels] for c in range(channels)], rate
-
-
-async def revoiced_call_sample(call: dict, owner: str, recordings_dir: str, make_speech) -> bytes:
-    """Like call_sample, but nobody's real voice is in it: each side is
-    re-voiced (revoice_track). make_speech(rate) returns a Speech for that rate."""
-    plain = zipfile.ZipFile(io.BytesIO(call_sample(call, owner, recordings_dir)))
-    meta = json.loads(plain.read("transcript.json"))
-    lines = meta.pop("lines")
-    meta.pop("format", None)
-    files = {}
-    tracks = {}
-    for name in ("other.wav", "agent.wav"):
-        if name in plain.namelist():
-            (pcm, *_), rate = _read_wav_bytes(plain.read(name))
-            revoiced, _ = await revoice_track(pcm, rate, make_speech(rate), owner_names(owner))
-            tracks[name] = (revoiced, rate)
-            files[name] = _wav([revoiced], rate)
-    if len(tracks) == 2 and tracks["other.wav"][1] == tracks["agent.wav"][1]:
-        other, agent = tracks["other.wav"][0], tracks["agent.wav"][0]
-        n = min(len(other), len(agent))
-        mixed = other[:n].astype(np.int32) + agent[:n].astype(np.int32)
-        files["call.wav"] = _wav([np.clip(mixed, -32768, 32767)], tracks["other.wav"][1])
-    meta.update(revoiced=True, audio=sorted(files))
     return _zip({**_text_files(meta, lines), **files})
 
 
@@ -367,9 +231,9 @@ def main(argv: list[str] | None = None) -> int:
     src.add_argument("--call", help="call id (or its first characters) from the agent's call history")
     src.add_argument("--recording", help="a 16-bit WAV from the PBX, e.g. under /var/spool/asterisk/monitor")
     parser.add_argument("--who", help="names for the channels of --recording, comma separated, e.g. caller,me")
-    parser.add_argument("--revoice", action="store_true",
-                        help="replace every voice with the TTS voice (same timing), so the sample can be shared publicly")
-    parser.add_argument("-o", "--output", help="zip file to write (default: sample-<id or file name>.zip)")
+    parser.add_argument("--no-audio", action="store_true",
+                        help="transcript and timings only, without the recording, so the sample can be shared")
+    parser.add_argument("-o", "--output", help="zip file to write (default: sample-<call id>.zip, or sample-<date and time>.zip for --recording)")
     args = parser.parse_args(argv)
 
     from .config import Config
@@ -388,10 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{len(matches)} calls match {args.call!r}", file=sys.stderr)
             return 1
         call = db.get_call(matches[0]["id"])
-        if args.revoice:
-            data = asyncio.run(revoiced_call_sample(call, cfg.owner_name, cfg.recordings_dir, make_speech))
-        else:
-            data = call_sample(call, cfg.owner_name, cfg.recordings_dir)
+        data = call_sample(call, cfg.owner_name, "" if args.no_audio else cfg.recordings_dir)
         out = args.output or f"sample-{call['id'][:8]}.zip"
     else:
         path = args.recording
@@ -400,14 +261,15 @@ def main(argv: list[str] | None = None) -> int:
         with wave.open(path) as w:
             speech = make_speech(w.getframerate())
         who = args.who.split(",") if args.who else None
-        data = asyncio.run(recording_sample(path, speech, cfg.owner_name, who, revoice=args.revoice))
-        out = args.output or f"sample-{os.path.splitext(os.path.basename(path))[0]}.zip"
+        data = asyncio.run(recording_sample(path, speech, cfg.owner_name, who, audio=not args.no_audio))
+        # Not the recording's name: FreePBX puts both phone numbers in it.
+        out = args.output or f"sample-{datetime.now():%Y%m%d-%H%M%S}.zip"
     with open(out, "wb") as f:
         f.write(data)
-    if args.revoice:
-        print(f"wrote {out} ({len(data) // 1024} KB), re-voiced. Listen once: the TTS voice reads what was said, redacted.")
+    if args.no_audio:
+        print(f"wrote {out} ({len(data) // 1024} KB), no audio. Read transcript.txt before you share it.")
     else:
-        print(f"wrote {out} ({len(data) // 1024} KB). Listen to the audio before you share it: only the text is redacted.")
+        print(f"wrote {out} ({len(data) // 1024} KB). The audio isn't redacted: keep it private.")
     return 0
 
 

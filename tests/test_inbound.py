@@ -131,3 +131,62 @@ async def test_failed_greeting_frees_the_inbound_slot(tmp_path):
     manager.speech = FakeSpeech()  # Piper is back
     call = await manager.register_inbound(str(uuid.uuid4()), "0491570157", "", "screener")
     assert call.status == "ringing"
+
+
+class StuckDialog(FakeDialog):
+    """An LLM (or speech server) that never answers."""
+
+    async def next_turn(self, *args, **kwargs):
+        self.calls += 1
+        await asyncio.Event().wait()
+
+
+async def _inbound_with(tmp_path, dialog, cfg=None, act=None):
+    cfg = cfg or make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    manager = CallManager(cfg, db, FakeSpeech(), dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    received: list[int] = []
+    try:
+        call_id = str(uuid.uuid4())
+        call = await manager.register_inbound(call_id, "0491570156", "", "screener")
+        pbx = asyncio.create_task(fake_pbx(server.sockets[0].getsockname()[1], call_id, received))
+        if act:
+            await act(manager, call)
+        await asyncio.wait_for(call.done.wait(), 15)
+        await asyncio.wait_for(pbx, 10)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+    return call, received
+
+
+@pytest.mark.asyncio
+async def test_owner_hangs_up_an_incoming_call(tmp_path):
+    """An incoming call has no channel of ours to hang up: the session does it."""
+    dialog = StuckDialog()
+
+    async def hang_up_mid_turn(manager, call):
+        while not dialog.calls:  # the caller has spoken and we're thinking
+            await asyncio.sleep(0.05)
+        assert await manager.hang_up(call.id)
+
+    call, received = await _inbound_with(tmp_path, dialog, act=hang_up_mid_turn)
+    assert call.outcome == "hung_up_by_owner"
+    assert ass.KIND_HANGUP in received
+
+
+@pytest.mark.asyncio
+async def test_time_limit_holds_while_a_turn_is_stuck(tmp_path, monkeypatch):
+    import dataclasses
+
+    import phone_agent.session as session
+
+    monkeypatch.setattr(session, "DEADLINE_GRACE_SECONDS", 0)
+    cfg = dataclasses.replace(make_config(tmp_path), inbound_max_seconds=2)
+    call, received = await _inbound_with(tmp_path, StuckDialog(), cfg)
+    assert call.outcome == "time_limit"
+    assert ass.KIND_HANGUP in received

@@ -48,6 +48,10 @@ TRAILING_OFF_SECONDS = 2.5
 MID_SENTENCE_MAX_SECONDS = 25  # longest we wait for a sentence they're in the middle of (VAD cuts at 20 s)
 LONE_THANKS_SECONDS = 10.0  # a bare "Thank you." later than this after our question is Whisper hearing noise
 AFTER_GOODBYE_SECONDS = 2.0  # listen after our goodbye before hanging up
+# The conversation checks its time limit between turns. If a turn is stuck
+# (a Whisper or Piper server that stopped answering, a slow LLM) the watchdog
+# hangs up this long after the limit.
+DEADLINE_GRACE_SECONDS = 30
 THINKING_SECONDS = 20  # quiet after our question is them thinking, not a reason to re-ask
 OVERLAP_MIN_SECONDS = 1.0  # speech starting with less than this of our line left is an answer
 INBOUND_GREETING_DELAY_SECONDS = 0.5  # answering: pause before "Hi, you've reached..."
@@ -338,6 +342,7 @@ class CallSession:
         # Time on hold doesn't count against max_call_seconds; this caps it instead.
         self.max_hold_seconds = max_hold_seconds
         self._hold_started: float | None = None
+        self._started = time.monotonic()  # reset when the call starts (run)
         self._held_seconds = 0.0
         # What they've said since we last spoke, to recognise a looping hold message.
         self._heard_since_we_spoke: list[str] = []
@@ -384,13 +389,20 @@ class CallSession:
         self._superseded_event: str | None = None
 
     async def run(self) -> None:
+        self._started = time.monotonic()
+        converse = asyncio.create_task(self._converse())
         tasks = [
             asyncio.create_task(self._read_loop()),
             asyncio.create_task(self._send_loop()),
             asyncio.create_task(self._gap_filler()),
+            asyncio.create_task(self._watchdog(converse)),
+            converse,
         ]
         try:
-            await self._converse()
+            await asyncio.wait([converse])
+            if converse.cancelled():
+                return  # the watchdog stopped it: hang up straight away
+            converse.result()
             if not self.hung_up:
                 await self._wait_drained(timeout=15)
         except Exception as exc:
@@ -409,9 +421,32 @@ class CallSession:
 
     # Conversation
 
+    async def _watchdog(self, converse: asyncio.Task) -> None:
+        """Ends the call when the owner hangs up on it (an incoming call has no
+        channel of ours to hang up), or when it runs past its time limit
+        and the conversation is stuck in a turn."""
+        call = self.call
+        while not converse.done():
+            await asyncio.sleep(1)
+            if call.outcome == "hung_up_by_owner":
+                log.info("call %s: hung up by the owner", call.id)
+            elif (self._on_hold and self._hold_started is not None
+                  and time.monotonic() - self._hold_started > self.max_hold_seconds + DEADLINE_GRACE_SECONDS):
+                log.warning("call %s: still on hold past the limit, hanging up", call.id)
+                call.set_outcome("time_limit")
+            elif (time.monotonic() - self._started - self._hold_total()
+                  > self.max_call_seconds + DEADLINE_GRACE_SECONDS):
+                log.warning("call %s: past the time limit and stuck in a turn, hanging up", call.id)
+                call.notes.append("Hung up at the time limit while waiting on speech or the LLM.")
+                call.set_outcome("time_limit")
+            else:
+                continue
+            converse.cancel()
+            return
+
     async def _converse(self) -> None:
         call = self.call
-        started = time.monotonic()
+        started = self._started
 
         inbound = call.brief.direction == "inbound"
         if inbound:

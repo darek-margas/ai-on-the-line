@@ -10,7 +10,11 @@ CI builds `ghcr.io/darek-margas/ai-on-the-line` for every push to `main` (`lates
     image: ghcr.io/darek-margas/ai-on-the-line:2026.11.1.2
 ```
 
-To build from your own checkout instead, uncomment `build: .` in the compose file and run `docker compose up -d --build`. The container runs as uid 10001 and writes only to `./data`.
+To build from your own checkout instead, uncomment `build: .` in the compose file and run `docker compose up -d --build`. The container runs as uid 10001 and writes only to `./data`. Create that folder before the first start, or Docker creates it owned by root and the agent stops with "Can't write to /data":
+
+```bash
+mkdir -p data && sudo chown 10001 data
+```
 
 ## Settings
 
@@ -129,8 +133,8 @@ Port 8090 also serves a few pages for people. The first visit asks for the API t
 With the PBX recordings mounted (`RECORDINGS_DIR`), a call page has a player and one Download line under it:
 
 - **recording with credit**: the call as a WAV, with "Made with AI on the Line" in its metadata and, unless `EXPORT_SPOKEN_CREDIT=false`, a short spoken credit at the end. The stored recording isn't changed. The line under it is the credit to paste if you publish the recording.
-- **test sample, re-voiced**: each side's audio with every voice replaced by the agent's, at the same timing, plus the redacted transcript with timings. This is the one to share, after reading its transcript. It takes a few seconds and is refused while a call is in progress.
-- **test sample, original audio**: the same with the real recording. Keep it to yourself.
+- **test sample, transcript only**: the redacted transcript with timings, no audio. This is the one to share, after reading it.
+- **test sample, with original audio**: the same plus each side's recording. Keep it to yourself.
 
 Without the recordings there's no player, and the only download is a test sample with the transcript and timings. [test-samples.md](test-samples.md) explains samples and how to contribute one.
 

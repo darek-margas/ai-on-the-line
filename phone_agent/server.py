@@ -26,7 +26,7 @@ from .credit import SPOKEN_CREDIT, credit_line, with_credit
 from .db import Database
 from .dialing import normalize_number
 from .dialog import DEFAULT_MUST_NOT, Brief, Dialog
-from .sample import call_sample, revoiced_call_sample
+from .sample import call_sample
 from .speech import Speech
 
 log = logging.getLogger(__name__)
@@ -394,12 +394,11 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
                 f"<audio id='rec' controls preload='metadata' src='/recordings/{cid}.wav'></audio>{WHOLE_FILE_PLAYER}"
                 f"<p class='downloads'><b>Download</b> "
                 f"<a href='/recordings/{cid}/download.wav'>recording with credit</a> &middot; "
-                f"test sample: <a href='/calls/{cid}/sample.zip?revoice=1'>re-voiced</a> "
-                f"or <a href='/calls/{cid}/sample.zip'>original audio</a></p>"
+                f"test sample: <a href='/calls/{cid}/sample.zip?audio=0'>transcript only</a> "
+                f"or <a href='/calls/{cid}/sample.zip'>with original audio</a></p>"
                 f"<p class='muted'>If you publish the recording: {esc(credit_line(cfg.credit_voice))}<br>"
                 "Test samples are for tuning: each side's audio and the transcript with timings, text redacted. "
-                "Re-voiced replaces every voice with the agent's at the same timing; read its transcript, then "
-                "it can be shared. Keep the original to yourself.</p>"
+                "Read the transcript-only sample before you share it. Keep the one with audio to yourself.</p>"
             )
         else:
             audio = (
@@ -550,21 +549,9 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         if call is None:
             return Response(status_code=404)
         day = when(call["started"] or call["created"], "%Y-%m-%d")
-        if request.query_params.get("revoice") == "1":
-            # Re-voicing runs every stretch of speech through Whisper and Piper:
-            # don't take them away from a live call.
-            if manager.busy():
-                return HTMLResponse(page("Busy", "<p>A call is in progress. Try again when it's finished.</p>"),
-                                    status_code=409)
-
-            def make_speech(rate: int) -> Speech:
-                return Speech(cfg.stt, cfg.tts, cfg.stt_language, cfg.tts_voice, rate, cfg.tts_pronounce)
-
-            body = await revoiced_call_sample(call, cfg.owner_name, cfg.recordings_dir, make_speech)
-            name = f"ai-on-the-line-sample-{day}-{call['id'][:8]}-revoiced.zip"
-        else:
-            body = await asyncio.to_thread(call_sample, call, cfg.owner_name, cfg.recordings_dir)
-            name = f"ai-on-the-line-sample-{day}-{call['id'][:8]}.zip"
+        with_audio = request.query_params.get("audio") != "0"
+        body = await asyncio.to_thread(call_sample, call, cfg.owner_name, cfg.recordings_dir if with_audio else "")
+        name = f"ai-on-the-line-sample-{day}-{call['id'][:8]}{'' if with_audio else '-transcript'}.zip"
         return Response(body, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={name}"})
 
     @mcp.custom_route("/recordings/{call_id}/download.wav", methods=["GET"])
@@ -751,6 +738,10 @@ async def main() -> None:
     if not cfg.api_token and os.environ.get("ALLOW_NO_AUTH", "").lower() != "true":
         # Without a token, anyone who can reach the port can phone people on your line.
         raise SystemExit("API_TOKEN is not set. Set one (openssl rand -hex 32), or ALLOW_NO_AUTH=true on a trusted network.")
+    if not os.access(cfg.data_dir, os.W_OK):
+        # Docker creates a missing ./data owned by root; the container runs as uid 10001.
+        raise SystemExit(f"Can't write to {cfg.data_dir}. On the Docker host, next to docker-compose.yml: "
+                         "mkdir -p data && sudo chown 10001 data")
     db = Database(cfg.data_dir)
     db.fail_unfinished_calls()
     speech = Speech(cfg.stt, cfg.tts, cfg.stt_language, cfg.tts_voice, cfg.audio_rate, cfg.tts_pronounce)

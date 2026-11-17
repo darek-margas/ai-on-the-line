@@ -92,86 +92,20 @@ def test_recording_sample(tmp_path):
         ("caller", "Hello, is that <owner>?"), ("me", "Yes, speaking."),
     ]
     assert meta["channels"] == 2 and "recording.wav" in z.namelist()
+    assert "file" not in meta
 
 
-class FakeVoice:
-    """Hears a fixed line per stretch of speech; 'speaks' a 300 Hz tone."""
+def test_recording_sample_keeps_numbers_in_the_file_name_out(tmp_path):
+    # FreePBX names recordings after both numbers.
+    path = tmp_path / "out-0412345678-201-20261117-091516-1763331316.1.wav"
+    path.write_bytes(wav_bytes([np.concatenate([tone(1), np.zeros(8000)])]))
 
-    def __init__(self, heard, rate=8000):
-        self.heard, self.rate, self.said = iter(heard), rate, []
+    class FakeSpeech:
+        async def transcribe(self, pcm):
+            return "Hello."
 
-    async def transcribe(self, pcm):
-        return next(self.heard)
-
-    async def synthesize(self, text):
-        self.said.append(text)
-        t = np.arange(int(self.rate * 0.8)) / self.rate
-        return (np.sin(2 * np.pi * 300 * t) * 8000).astype(np.int16).tobytes()
-
-
-def test_stretch_hits_exact_length():
-    from phone_agent.sample import stretch
-
-    voice = tone(0.8).astype(np.float32)
-    for seconds in (0.4, 0.8, 2.0):
-        assert len(stretch(voice, int(seconds * 8000), 8000)) == int(seconds * 8000)
-
-
-def test_revoice_track_keeps_timing_not_voice():
-    from phone_agent.sample import revoice_track, speech_segments
-
-    rate = 8000
-    original = np.concatenate([np.zeros(rate), tone(1.5), np.zeros(rate), tone(0.6), np.zeros(rate)]).astype(np.int16)
-    speech = FakeVoice(["Hi, it's Alex, call me on 0491 570 156.", ""])
-    out, lines = asyncio.run(revoice_track(original, rate, speech, ["Alex"]))
-    assert len(out) == len(original)
-    # Sound exactly where the original had speech, silence everywhere else.
-    segments = speech_segments(original, rate)
-    inside = np.zeros(len(out), dtype=bool)
-    for a, b in segments:
-        inside[int(a * rate) : int(b * rate)] = True
-        assert np.abs(out[int(a * rate) : int(b * rate)]).mean() > 1000
-    assert np.abs(out[~inside]).max() == 0
-    # Not the original audio: the first stretch is the TTS tone, the second (nothing recognised) is noise.
-    first = slice(int(1.1 * rate), int(2.3 * rate))
-    assert abs(np.corrcoef(out[first].astype(float), original[first].astype(float))[0, 1]) < 0.2
-    assert speech.said == ["Hi, it's Alex, call me on a number."]  # spoken redacted, owner as "Alex"
-    assert lines == [{"t": 1.0, "text": "Hi, it's <owner>, call me on <number>."}]
-
-
-def test_revoiced_call_sample(tmp_path):
-    from phone_agent.sample import revoiced_call_sample
-
-    rec = tmp_path / "phone-agent"
-    rec.mkdir()
-    (rec / "abc-rx.wav").write_bytes(wav_bytes([np.concatenate([np.zeros(8000), tone(1), np.zeros(8000)])]))
-    (rec / "abc-tx.wav").write_bytes(wav_bytes([np.concatenate([tone(1), np.zeros(16000)])]))
-    (rec / "abc.wav").write_bytes(wav_bytes([tone(3)]))
-    call = {"id": "abc", "brief": {"direction": "outbound"}, "recording": "phone-agent/abc.wav",
-            "transcript": [["agent", "Hello."], ["callee", "Hi."]], "timings": [0.0, 1.0]}
-    voices = iter([FakeVoice(["Hi."]), FakeVoice(["Hello."])])
-    z = zipfile.ZipFile(io.BytesIO(asyncio.run(revoiced_call_sample(call, "Alex", str(tmp_path), lambda rate: next(voices)))))
-    assert sorted(z.namelist()) == ["README.txt", "agent.wav", "call.wav", "other.wav", "transcript.json", "transcript.txt"]
-    meta = json.loads(z.read("transcript.json"))
-    assert meta["revoiced"] is True and meta["format"] == "ai-on-the-line-sample/1"
-    original = np.frombuffer(wave.open(str(rec / "abc-rx.wav")).readframes(10**6), dtype=np.int16)
-    revoiced = np.frombuffer(wave.open(io.BytesIO(z.read("other.wav"))).readframes(10**6), dtype=np.int16)
-    assert len(revoiced) == len(original) and not np.array_equal(revoiced, original)
-
-
-def test_revoice_retries_a_dropped_connection():
-    from phone_agent.sample import revoice_track
-
-    class Flaky(FakeVoice):
-        failed = False
-
-        async def synthesize(self, text):
-            if not self.failed:
-                self.failed = True
-                raise ConnectionError("Wyoming TTS closed the connection")
-            return await super().synthesize(text)
-
-    pcm = np.concatenate([np.zeros(8000), tone(1), np.zeros(8000)]).astype(np.int16)
-    speech = Flaky(["Hello."])
-    out, lines = asyncio.run(revoice_track(pcm, 8000, speech, []))
-    assert speech.failed and lines == [{"t": 1.0, "text": "Hello."}] and np.abs(out).max() > 0
+    data = asyncio.run(recording_sample(str(path), FakeSpeech(), audio=False))
+    z = zipfile.ZipFile(io.BytesIO(data))
+    assert z.namelist() == ["README.txt", "transcript.json", "transcript.txt"]
+    assert b"0412345678" not in data and b"1763331316" not in data
+    assert "There is no audio" in z.read("README.txt").decode()
