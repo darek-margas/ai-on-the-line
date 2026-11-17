@@ -557,7 +557,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
     @mcp.custom_route("/recordings/{call_id}/download.wav", methods=["GET"])
     async def recording_download(request: Request) -> Response:
         """The recording as a file to keep or publish, with the credit in its
-        metadata and (unless EXPORT_SPOKEN_CREDIT=false) spoken at the end."""
+        metadata and (unless EXPORT_SPOKEN_CREDIT=false) spoken at the start."""
         call = manager.get(request.path_params["call_id"])
         if not (cfg.recordings_dir and call and call["recording"]):
             return Response(status_code=404)
@@ -566,13 +566,13 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             return Response(status_code=404)
         with open(path, "rb") as f:
             wav = f.read()
-        outro = None
+        spoken = None
         if cfg.export_spoken_credit:
             try:
-                outro = await speech.synthesize(SPOKEN_CREDIT)
+                spoken = await speech.synthesize(SPOKEN_CREDIT)
             except Exception:
                 log.warning("spoken credit unavailable; download has the metadata credit only", exc_info=True)
-        body = with_credit(wav, credit_line(cfg.credit_voice), outro, speech.rate)
+        body = with_credit(wav, credit_line(cfg.credit_voice), spoken, speech.rate)
         day = when(call["started"] or call["created"], "%Y-%m-%d")
         name = f"ai-on-the-line-{day}-{call['id'][:8]}.wav"
         return Response(body, media_type="audio/wav", headers={"Content-Disposition": f"attachment; filename={name}"})

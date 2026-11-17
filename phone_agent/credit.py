@@ -5,7 +5,7 @@
 A credit in NOTICE can't be required of people who publish recordings, so it's
 made the default instead: a download from the call page carries the credit in
 the WAV's metadata and, unless EXPORT_SPOKEN_CREDIT=false, a short spoken line
-at the end. The stored recording is never changed.
+at the start. The stored recording is never changed.
 """
 
 import io
@@ -18,6 +18,10 @@ import soxr
 PROJECT = "AI on the Line"
 PROJECT_URL = "https://github.com/darek-margas/ai-on-the-line"
 SPOKEN_CREDIT = "Recorded with AI on the Line."
+# The credit is spoken a little louder than the TTS renders it, so it stands out
+# against a quiet phone recording, unless that would clip.
+CREDIT_GAIN_DB = 2.0
+CREDIT_PEAK = 32000  # just under full scale
 
 
 def credit_line(voice: str = "") -> str:
@@ -38,23 +42,25 @@ def _info_chunk(comment: str) -> bytes:
     return b"LIST" + struct.pack("<I", len(body)) + body
 
 
-def with_credit(wav: bytes, comment: str, outro: bytes | None = None, outro_rate: int = 16000) -> bytes:
-    """The recording with the credit in its metadata, and the spoken outro
-    (16-bit mono PCM at outro_rate) appended after a short pause, if given.
-    Anything that isn't 16-bit PCM keeps its audio as it is."""
+def with_credit(wav: bytes, comment: str, spoken: bytes | None = None, spoken_rate: int = 16000) -> bytes:
+    """The recording with the credit in its metadata and, if given, the spoken
+    credit (16-bit mono PCM at spoken_rate) in front of it, followed by a short
+    pause. Anything that isn't 16-bit PCM keeps its audio as it is."""
     with wave.open(io.BytesIO(wav)) as src:
         params = src.getparams()
         frames = src.readframes(params.nframes)
-    if outro and params.sampwidth == 2:
-        speech = np.frombuffer(outro, dtype=np.int16).astype(np.float32)
-        if outro_rate != params.framerate:
-            speech = soxr.resample(speech, outro_rate, params.framerate)
-        speech = np.clip(speech, -32768, 32767).astype(np.int16)
+    if spoken and params.sampwidth == 2:
+        speech = np.frombuffer(spoken, dtype=np.int16).astype(np.float32)
+        if spoken_rate != params.framerate:
+            speech = soxr.resample(speech, spoken_rate, params.framerate)
+        peak = float(np.abs(speech).max()) if len(speech) else 0.0
+        gain = min(10 ** (CREDIT_GAIN_DB / 20), CREDIT_PEAK / peak) if peak else 1.0
+        speech = np.clip(speech * gain, -32768, 32767).astype(np.int16)
         pause = np.zeros(int(params.framerate * 0.6), dtype=np.int16)
-        tail = np.concatenate([pause, speech])
+        head = np.concatenate([speech, pause])
         if params.nchannels > 1:
-            tail = np.repeat(tail, params.nchannels)
-        frames += tail.tobytes()
+            head = np.repeat(head, params.nchannels)
+        frames = head.tobytes() + frames
     out = io.BytesIO()
     with wave.open(out, "wb") as dst:
         dst.setnchannels(params.nchannels)

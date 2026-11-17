@@ -718,16 +718,25 @@ def test_downloaded_recording_carries_the_credit():
     import io
     import wave
 
+    import numpy as np
+
     from phone_agent.credit import credit_line, with_credit
 
     src = io.BytesIO()
     with wave.open(src, "wb") as w:  # one second of 8 kHz phone audio, as MixMonitor writes it
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000); w.writeframes(b"\x10\x00" * 8000)
-    outro = b"\x20\x00" * 8000  # half a second of "speech" at 16 kHz
-    out = with_credit(src.getvalue(), credit_line("Jenny (Dioco)"), outro, 16000)
+    spoken = b"\x00\x10" * 8000  # half a second of "speech" at 16 kHz, level 4096
+    out = with_credit(src.getvalue(), credit_line("Jenny (Dioco)"), spoken, 16000)
     with wave.open(io.BytesIO(out)) as w:
         assert w.getframerate() == 8000
-        assert w.getnframes() == 8000 + int(8000 * 0.6) + 4000  # the call, a pause, the spoken credit
+        assert w.getnframes() == 4000 + int(8000 * 0.6) + 8000  # the spoken credit, a pause, the call
+        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    assert abs(int(pcm[2000]) - round(4096 * 10 ** (2 / 20))) <= 2  # 2 dB louder
+    assert (pcm[-8000:] == 16).all()  # the call itself is untouched, at the end
+    # A credit that's already loud is raised only up to just under full scale.
+    loud = with_credit(src.getvalue(), "", b"\x00\x7c" * 8000, 16000)  # level 31744
+    with wave.open(io.BytesIO(loud)) as w:
+        assert np.abs(np.frombuffer(w.readframes(4000), dtype=np.int16)).max() <= 32000
     assert b"Made with AI on the Line (https://github.com/darek-margas/ai-on-the-line). Voice: Jenny (Dioco)" in out
     assert b"ICMT" in out and b"ISFT" in out
     # Without the spoken part only the metadata changes.

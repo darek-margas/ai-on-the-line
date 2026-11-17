@@ -132,7 +132,7 @@ Port 8090 also serves a few pages for people. The first visit asks for the API t
 
 With the PBX recordings mounted (`RECORDINGS_DIR`), a call page has a player and one Download line under it:
 
-- **recording with credit**: the call as a WAV, with "Made with AI on the Line" in its metadata and, unless `EXPORT_SPOKEN_CREDIT=false`, a short spoken credit at the end. The stored recording isn't changed. The line under it is the credit to paste if you publish the recording.
+- **recording with credit**: the call as a WAV, with "Made with AI on the Line" in its metadata and, unless `EXPORT_SPOKEN_CREDIT=false`, a short spoken credit at the start. The stored recording isn't changed. The line under it is the credit to paste if you publish the recording.
 - **test sample, transcript only**: the redacted transcript with timings, no audio. This is the one to share, after reading it.
 - **test sample, with original audio**: the same plus each side's recording. Keep it to yourself.
 
