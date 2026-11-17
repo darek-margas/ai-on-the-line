@@ -35,6 +35,11 @@ LISTEN_SECONDS = 10
 SILENT_ANSWER_SECONDS = 5  # answered but nobody speaks: introduce ourselves
 ECHO_OVERLAP = 0.6  # share of heard words that must be ours to count as echo
 INTRO_PAUSE_SECONDS = 2.5  # quiet after our introduction before we just carry on
+# After a recorded-sounding greeting ("Hi, welcome to Optus Sales."): this much
+# quiet means a person said it and is waiting for us. Kept long enough not to
+# land in a pause inside the recording: a person who waits soon says "Hello?",
+# and that gets the opening at once.
+GREETING_PAUSE_SECONDS = 5.0
 # Extra wait when their sentence sounds unfinished: longer when it clearly trails
 # off ("I think about...", "...and the"), shorter when Whisper just left out the
 # full stop, which it often does on a complete sentence.
@@ -78,7 +83,9 @@ RECORDING_HINT = re.compile(
 )
 PERSON_CUE = re.compile(
     r"\bspeaking\b|^\W*hello\W*$|hello\?|how can i help|can i help|say (it|that) again|are you there|"
-    r"anyone there|who'?s (this|calling)|good (morning|afternoon)|direct your call|how may i help",
+    r"anyone there|who'?s (this|calling)|good (morning|afternoon)|direct your call|how may i help|"
+    r"(can|may) we help|how (i|we) (can|may) help|my name(?:'s| is)|"
+    r"you(?:'re| are) (?:talking|through) (?:to|with)",
     re.I,
 )
 BARE_HELLO = re.compile(r"^\W*(hello|hi|hey)\W*$", re.I)
@@ -277,6 +284,15 @@ def person_greeting(text: str, seconds: float) -> bool:
     return seconds <= 4.0 or (seconds <= 10.0 and bool(PERSON_CUE.search(text)))
 
 
+def recorded_greeting(text: str) -> bool:
+    """First words that sound like the start of a recording ("Hi, welcome to Optus
+    Sales."): a privacy notice or a voice bot usually follows. Not a menu (that
+    wants a key) and not a question (that wants an answer)."""
+    return bool(RECORDING_HINT.search(text)) and not (
+        PERSON_CUE.search(text) or MENU_WORDS.search(text) or text.rstrip().endswith("?")
+    )
+
+
 def asks_how_we_are(text: str) -> int:
     return 1 if HOW_ARE_YOU.search(text) else 0
 
@@ -325,6 +341,9 @@ class CallSession:
         self._held_seconds = 0.0
         # What they've said since we last spoke, to recognise a looping hold message.
         self._heard_since_we_spoke: list[str] = []
+        # The call opened with a recorded-sounding greeting: wait a moment to see
+        # whether the recording carries on or a person is waiting for us.
+        self._greeting_pause = False
         self.barge_in = barge_in
 
         # Everything inside the session runs at the speech rate; Asterisk converts
@@ -441,7 +460,8 @@ class CallSession:
                 event, pending_event = pending_event, None
                 item, forced = None, True
             else:
-                item = await self._next_utterance(timeout=min(LISTEN_SECONDS, remaining))
+                wait = GREETING_PAUSE_SECONDS if self._greeting_pause else LISTEN_SECONDS
+                item = await self._next_utterance(timeout=min(wait, remaining))
                 forced = False
             if not answered and item not in (None, HANGUP):
                 answered = True
@@ -456,6 +476,13 @@ class CallSession:
                 if not text:
                     continue
                 self._heard_since_we_spoke.append(text)  # a hold message may loop from here
+                if recorded_greeting(text):
+                    # "Hi, welcome to Optus Sales.": likely a recording with more to come.
+                    # Treat what follows like a queue; quiet right after it means a person.
+                    log.info("call %s: greeting sounds recorded; listening on", call.id)
+                    self._on_hold = True
+                    self._greeting_pause = True
+                    continue
                 item = None  # already transcribed: let the dialog look at it
                 event = "The call was just answered; their first words are at the end of the conversation."
                 turn_ready = True
@@ -479,6 +506,15 @@ class CallSession:
                     # you still there?" just before it finished.)
                     silent_for = 0
                     continue
+                if self._greeting_pause:
+                    # They stopped after the greeting: a person, waiting for us.
+                    log.info("call %s: quiet after the greeting; introducing", call.id)
+                    self._greeting_pause = False
+                    self._on_hold = False
+                    await self._say(call.brief.opening_line)
+                    if await self._follow_intro():
+                        return
+                    continue
                 silent_for += LISTEN_SECONDS
                 if silent_for >= self.hold_timeout_seconds:
                     call.set_outcome("no_response")
@@ -498,6 +534,7 @@ class CallSession:
                     )
             else:
                 silent_for = 0
+                self._greeting_pause = False  # the recording carried on
                 asked = self._just_asked()
                 heard = [await self._heard(item)]
                 # They may have kept talking while we were busy; take it all in.
@@ -542,11 +579,15 @@ class CallSession:
                     # Hold tones ("Beep."): nothing to answer.
                     self._on_hold = True
                     continue
-                if self._on_hold and not self._introduced() and (is_promo(joined) or sounds_recorded(joined) or all(MUSIC_HALLUCINATION.fullmatch(h.strip(" .!")) for h in said)):
+                if self._on_hold and not self._introduced() and (
+                    is_promo(joined) or sounds_recorded(joined)
+                    or all(MUSIC_HALLUCINATION.fullmatch(h.strip(" .!")) or THANKS_ONLY.match(h.strip()) for h in said)
+                ):
                     # In the queue, before anyone has heard our opening: an ad for their
-                    # website or Whisper's caption for music. Stay on hold. (Once we've
-                    # introduced ourselves, the model decides: it may be the person back.) A person coming back says who they are or asks
-                    # how they can help, and that doesn't match.
+                    # website or Whisper's caption for music (a lone "Thank you." is its
+                    # favourite). Stay on hold. Once we've introduced ourselves, the model
+                    # decides: it may be the person back. A person coming on says who they
+                    # are or asks how they can help, and that doesn't match.
                     log.info("call %s: recording, promotion or music while on hold, ignored", call.id)
                     self._heard_since_we_spoke.extend(said)
                     continue

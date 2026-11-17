@@ -879,7 +879,6 @@ async def test_looping_hold_message_skips_the_model(tmp_path):
         "Yes, that plan includes international calls.",
     ])
     dialog = ScriptedDialog([
-        Turn(),  # the announcement the first time: stay quiet
         Turn(say="Great, thanks. Bye!", answers={"international": "yes"}, end_call=True, outcome="completed"),
     ])
     manager = CallManager(cfg, db, speech, dialog, None)
@@ -902,7 +901,7 @@ async def test_looping_hold_message_skips_the_model(tmp_path):
     saved = db.get_call(call.id)
     agent = [text for who, text in saved["transcript"] if who == "agent"]
     assert agent == [brief.opening_line, "Great, thanks. Bye!"], saved["transcript"]
-    assert dialog.calls == 2  # the first announcement and the answer; not the repeats
+    assert dialog.calls == 1  # only the answer: the announcements never reach the model
     assert saved["outcome"] == "completed"
 
 
@@ -931,3 +930,123 @@ def test_long_lines_in_a_queue_sound_recorded():
     assert not sounds_recorded("You've reached McDonald's Caringbah, Jane speaking, how can I help you today?")
     assert not sounds_recorded("Hello?")
     assert not sounds_recorded("For accounts and billing press 1, for technical support press 2, for anything else please stay on the line.")
+
+
+def test_recorded_greeting():
+    from phone_agent.session import recorded_greeting
+    for text in ["Hi, welcome to Optus Sales.", "Thank you for calling Telstra.", "Welcome to Bunnings Warehouse."]:
+        assert recorded_greeting(text), text
+    for text in [
+        "Welcome to Bunnings, how can I help?",
+        "Thanks for calling Flower Power, Jordan speaking.",
+        "Welcome to Optus, you are speaking to Kay.",
+        "Welcome to Optus, you're talking to Kay.",
+        "Thank you for calling Telstra, you're through to Mia.",
+        "Welcome to Harvey Norman. For sales, press 1.",
+        "Thank you for calling, is this about an order?",
+        "Hello?",
+        "In a sentence, please tell me how we can help you today.",
+    ]:
+        assert not recorded_greeting(text), text
+
+
+@pytest.mark.asyncio
+async def test_recorded_greeting_then_privacy_notice(tmp_path):
+    """Optus: "Hi, welcome to Optus Sales.", a privacy notice, then a voice bot
+    asking what we want. The agent stays quiet through the recording and answers
+    the bot; the model sees only the bot's question."""
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    speech = ScriptedSpeech([
+        "Hi, welcome to Optus Sales.",
+        "We are recording this call and using your phone number and information shared during the call "
+        "to address your inquiry and enhance your experience for training and quality assurance purposes.",
+        "In a sentence, please tell me how we can help you today.",
+    ])
+    dialog = ScriptedDialog([
+        Turn(say="A new phone deal, please.", end_call=True, outcome="completed"),
+    ])
+    manager = CallManager(cfg, db, speech, dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    # The notice starts a second after the greeting: within the greeting pause.
+    ari = BurstAri(server.sockets[0].getsockname()[1], [60, 400, 120], gaps=[50, 50, 75])
+    manager.ari = ari
+
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    try:
+        brief = Brief(goal="Phone deal", callee="Telco sales", opening_line="Hi, I'm Alex's assistant, asking about phone deals.",
+                      questions={"deal": "best deal"})
+        call = manager.start_call("0255500000", brief)
+        await asyncio.wait_for(call.done.wait(), 60)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+
+    saved = db.get_call(call.id)
+    agent = [text for who, text in saved["transcript"] if who == "agent"]
+    assert agent[0] == "A new phone deal, please.", saved["transcript"]  # nothing said over the recording
+    assert dialog.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_greeting_then_quiet_is_a_person(tmp_path):
+    """"Thank you for calling Riverside." and then nothing: a person waiting for
+    us. The agent introduces itself after a short pause, without the model."""
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    speech = ScriptedSpeech(["Thank you for calling Riverside.", "Yes, we're open on Sunday."])
+    dialog = ScriptedDialog([Turn(say="Great, thanks. Bye!", end_call=True, outcome="completed")])
+    manager = CallManager(cfg, db, speech, dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    ari = BurstAri(server.sockets[0].getsockname()[1], [60, 60], gaps=[400, 75])
+    manager.ari = ari
+
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    try:
+        brief = Brief(goal="Opening hours", callee="Riverside", opening_line="Hi, I'm Alex's assistant, are you open on Sunday?",
+                      questions={"sunday": "open on Sunday"})
+        call = manager.start_call("0255500000", brief)
+        await asyncio.wait_for(call.done.wait(), 60)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+
+    saved = db.get_call(call.id)
+    agent = [text for who, text in saved["transcript"] if who == "agent"]
+    assert agent[0] == brief.opening_line, saved["transcript"]
+    assert dialog.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_greeting_then_hello_is_a_person(tmp_path):
+    """"Thank you for calling Riverside." ... "Hello?": a person who got no answer.
+    The opening goes out at once, without the model."""
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    speech = ScriptedSpeech(["Thank you for calling Riverside.", "Hello?", "Yes, we're open on Sunday."])
+    dialog = ScriptedDialog([Turn(say="Great, thanks. Bye!", end_call=True, outcome="completed")])
+    manager = CallManager(cfg, db, speech, dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    ari = BurstAri(server.sockets[0].getsockname()[1], [60, 25, 60], gaps=[100, 100, 75])
+    manager.ari = ari
+
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    try:
+        brief = Brief(goal="Opening hours", callee="Riverside", opening_line="Hi, I'm Alex's assistant, are you open on Sunday?",
+                      questions={"sunday": "open on Sunday"})
+        call = manager.start_call("0255500000", brief)
+        await asyncio.wait_for(call.done.wait(), 60)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+
+    saved = db.get_call(call.id)
+    agent = [text for who, text in saved["transcript"] if who == "agent"]
+    assert agent[0] == brief.opening_line, saved["transcript"]
+    assert dialog.calls == 1
