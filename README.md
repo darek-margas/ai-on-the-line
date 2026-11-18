@@ -158,8 +158,8 @@ To help with turn-taking, the call page exports a [test sample](docs/test-sample
 
 The full setup is in two guides: [running the agent](docs/running-the-agent.md) (image, settings, speech, ports, the web pages and downloads, updates) and [the Asterisk side](docs/asterisk-freepbx.md). The short version:
 
-1. Add the dialplan contexts and an ARI user to Asterisk.
-2. Copy `.env.example` to `.env`, point it at Asterisk, Whisper and Piper, and set `API_TOKEN`. Create the data folder for the container's user (`mkdir data && sudo chown 10001 data`), then run `docker compose up -d`. The image is built by CI as `ghcr.io/darek-margas/ai-on-the-line`.
+1. On the PBX, run [`asterisk/setup-pbx.sh`](asterisk/setup-pbx.sh) `--agent-host <docker-host>`. It creates the ARI and AMI users and the dialplan, works on FreePBX and plain Asterisk, and prints the lines for the agent's `.env`. `--check` tells you later what's broken. The [FreePBX guide](docs/asterisk-freepbx.md#the-quick-way-setup-pbxsh) has the options, and the same steps by hand.
+2. Copy `.env.example` to `.env`, paste in the lines from step 1, point it at Whisper and Piper, and set `API_TOKEN`. Create the data folder for the container's user (`mkdir data && sudo chown 10001 data`), then run `docker compose up -d`. The image is built by CI as `ghcr.io/darek-margas/ai-on-the-line`.
 3. Connect Claude: `claude mcp add --transport http ai-on-the-line http://<docker-host>:8090/mcp --header "Authorization: Bearer <API_TOKEN>"`.
 4. Ask Claude to run `check_setup`. It times a round trip through Piper and Whisper and checks Asterisk and the model.
 5. Install the scripted test receptionist on extension 7999 and call it before you call anyone real.

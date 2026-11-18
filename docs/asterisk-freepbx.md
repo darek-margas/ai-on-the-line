@@ -4,6 +4,40 @@ This is how I connected the agent to FreePBX 17 (Asterisk 22) with an Internode 
 
 The outbound part (the agent calling businesses) needs sections 1 to 5. Sections 6 onwards are for answering calls.
 
+## The quick way: setup-pbx.sh
+
+[`asterisk/setup-pbx.sh`](../asterisk/setup-pbx.sh) does sections 2 to 4, the screener's contexts from section 6 and, if you ask, the NFS share from section 12. It works on FreePBX and on plain Asterisk. Run it on the PBX as root, with the address of the Docker host that runs the agent:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/darek-margas/ai-on-the-line/main/asterisk/setup-pbx.sh
+chmod +x setup-pbx.sh
+./setup-pbx.sh --agent-host 192.168.1.20 --dry-run     # see what it would change
+./setup-pbx.sh --agent-host 192.168.1.20
+```
+
+It prints the lines for the agent's `.env` (ARI and AMI users with generated passwords, `DIAL_ENDPOINT`, `AUDIOSOCKET_ADVERTISE`) and saves them in `/root/ai-on-the-line.env`. Then it checks everything it set up and says what's missing.
+
+What it changes:
+
+- Its own files, `/etc/asterisk/ai-on-the-line-*.conf`, each pulled in by one `#include` line: in the `*_custom.conf` files on FreePBX, in `extensions.conf`, `ari.conf` and `manager.conf` on plain Asterisk. It doesn't edit anything you wrote.
+- An ARI user and an AMI user, both called `ai-on-the-line`. The AMI user only accepts the agent's host.
+- The `[phone-agent]` context and `/usr/local/bin/agent-recording-finish`.
+- On FreePBX: the HTTP and ARI settings (enabled, listening on all addresses), and a firewall trust entry for the agent's host.
+
+Options worth knowing:
+
+- `--screener --token <API_TOKEN>` adds incoming calls: test extension 7990, and a context `ai-on-the-line-screen,s,1` to add under Admin → Custom Destinations and pick in an inbound route. `--fallback ext-local,vmu101,1` sends callers to 101's voicemail when the agent can't answer.
+- `--nfs` shares the recordings folder read-only with the agent's host and prints the line for that host's `/etc/fstab`.
+- `--dial-context` is the context outgoing calls go through. FreePBX uses `from-internal`; on plain Asterisk you have to give it.
+- `--check` changes nothing and reports what works: modules, HTTP, the users, the dialplan, recordings, and whether the agent's ports answer. Run it after an upgrade, or when calls stop working.
+- `--uninstall` removes its files and users again.
+
+Running it again keeps the passwords, so the agent's `.env` stays valid. If the PBX already has a `[phone-agent]` context written by hand, as mine does from before the script existed, it stops instead of adding a second one.
+
+On plain Asterisk it won't edit `http.conf` and the `[general]` section of `ari.conf`; it tells you if the HTTP server or ARI is off.
+
+The sections below are the same setup by hand, with the reasons behind each piece.
+
 ## 1. Trunk and codecs
 
 Any SIP trunk that can make normal outbound calls will do. Put alaw (or ulaw) first in the trunk's codec list, and G.722 first on your own extensions if your phones support it.
