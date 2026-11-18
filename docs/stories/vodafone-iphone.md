@@ -12,7 +12,17 @@ The brief from the second Telstra call with Vodafone's name in it. Two changes: 
 
 ## The call
 
-Just under six minutes, about one of them in the queue:
+Just under six minutes, about one of them in the queue.
+
+<p>
+<img src="../images/calls/vodafone-1.png" width="720" alt="Transcript, part 1 of 4">
+<img src="../images/calls/vodafone-2.png" width="720" alt="Transcript, part 2 of 4">
+<img src="../images/calls/vodafone-3.png" width="720" alt="Transcript, part 3 of 4">
+<img src="../images/calls/vodafone-4.png" width="720" alt="Transcript, part 4 of 4">
+</p>
+
+<details>
+<summary>The same transcript as text</summary>
 
 ```
 Voice bot:    Welcome to Vodafone. Please tell us in a sentence how we can help you today.
@@ -78,6 +88,8 @@ Roslina:      Yes.
 Agent:        Brilliant, that's everything I needed. I'll pass it all to Darek and he'll decide.
               Thanks so much, Roslina! Thanks, bye!
 ```
+
+</details>
 
 The report: no discount on the phone ($2,299, or $63.86 a month over 36 months), a large plan at $78 a month reduced to $55 for 12 months with double data, month to month with no contract. Roslina confirmed the summary.
 

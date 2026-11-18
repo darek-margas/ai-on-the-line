@@ -44,7 +44,18 @@ recording_notice: true
 
 ## The call
 
-Fifteen and a half minutes, about nine of them on hold. Hold condensed:
+Fifteen and a half minutes, about nine of them on hold. Hold condensed; the whole hold is further down.
+
+<p>
+<img src="../images/calls/telstra-1.png" width="720" alt="Transcript, part 1 of 5">
+<img src="../images/calls/telstra-2.png" width="720" alt="Transcript, part 2 of 5">
+<img src="../images/calls/telstra-3.png" width="720" alt="Transcript, part 3 of 5">
+<img src="../images/calls/telstra-4.png" width="720" alt="Transcript, part 4 of 5">
+<img src="../images/calls/telstra-5.png" width="720" alt="Transcript, part 5 of 5">
+</p>
+
+<details>
+<summary>The same transcript as text</summary>
 
 ```
 Recording:    Thanks for calling Telstra. This call is being recorded.
@@ -133,6 +144,8 @@ Sherry:       Yes, you can get that if you sign up for the 50 gigs plan. Like th
 Agent:        Brilliant, that's really clear. Thanks Sherry, I'll pass it all to Darek and he'll
               decide from there. Have a great day!
 ```
+
+</details>
 
 <details>
 <summary>The whole hold, as speech recognition heard it</summary>

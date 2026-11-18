@@ -29,7 +29,18 @@ run_at: 2026-11-17 09:15
 
 ## The call
 
-Nine and a half minutes. Transcript from speech recognition, hold condensed:
+Nine and a half minutes. Transcript from speech recognition, hold condensed.
+
+<p>
+<img src="../images/calls/optus-1.png" width="720" alt="Transcript, part 1 of 5">
+<img src="../images/calls/optus-2.png" width="720" alt="Transcript, part 2 of 5">
+<img src="../images/calls/optus-3.png" width="720" alt="Transcript, part 3 of 5">
+<img src="../images/calls/optus-4.png" width="720" alt="Transcript, part 4 of 5">
+<img src="../images/calls/optus-5.png" width="720" alt="Transcript, part 5 of 5">
+</p>
+
+<details>
+<summary>The same transcript as text</summary>
 
 ```
 Recording: Hi, welcome to Optus Sales.
@@ -104,6 +115,8 @@ Kay:       Yes.
 Agent:     Brilliant, that's really helpful Kay. Darek's just comparing prices today and will
            decide himself, so thanks so much for your time. Have a great day!
 ```
+
+</details>
 
 The report that came back: the iPhone 18 Pro Max 256 GB at $63.86 a month over 36 months, on the $60 plan, with new services paying $39 a month for the first 12 months. Kay confirmed the closing summary word for word. Nobody offered a total, so `cheapest_total` stayed empty.
 
