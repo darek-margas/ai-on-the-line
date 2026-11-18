@@ -18,7 +18,7 @@ The call screener, Purgatory, answers the calls I'd rather not take. [Three pitc
 
 [Talking the screener out of its brief](prompt-injection.md) is me trying prompt injection by phone: asking it to drop its instructions, read out its brief and the last call, and claiming to be the owner.
 
-The screener calls have recordings: I was the caller. The Vodafone call has its recording; the other outgoing calls have transcripts for now, and their recordings will follow.
+The screener calls have recordings: I was the caller. The Telstra and Vodafone calls have recordings; the Optus call has a transcript for now, and its recording will follow.
 
 ---
 

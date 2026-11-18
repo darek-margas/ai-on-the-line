@@ -44,7 +44,11 @@ recording_notice: true
 
 ## The call
 
-Fifteen and a half minutes, about nine of them on hold. Hold condensed; the whole hold is further down.
+Fifteen and a half minutes, about nine of them on hold. The whole call, levelled, with the spoken credit at the start. The voice menu, the recording notice, the hold left in full, then Sherry:
+
+https://github.com/user-attachments/assets/bb6f0419-c6e8-47a3-9c75-22bf996d9993
+
+The transcript, hold condensed; the whole hold is further down.
 
 <p>
 <img src="../images/calls/telstra-1.png" width="720" alt="Transcript, part 1 of 5">
