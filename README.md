@@ -20,14 +20,14 @@ A bigger one: my phone is due for replacement, so I had it ask [Optus](docs/stor
 
 ## All the calls
 
-Each one has a transcript and a note on what it taught me. The outbound calls went to real businesses, so for now those are transcripts only. The screener calls have recordings: I was the caller there.
+Each one has a transcript and a note on what it taught me. The Vodafone call has its recording; the other outbound calls are transcripts for now, with recordings to follow. The screener calls have recordings: I was the caller there.
 
 | Call | Direction | What happens |
 |---|---|---|
 | [Organic honey](#what-its-for) | Calling out | A supermarket voice robot, hold beeps, a person checking the shelf, and a report that says the price was a guess |
 | [Optus: best iPhone deal](docs/stories/optus-iphone.md) | Calling out | A voice bot, a hold queue and a consultant on a clipped line; the price comes back confirmed |
 | [Telstra: best iPhone deal](docs/stories/telstra-iphone.md) | Calling out | Nine minutes of hold music heard as "Thank you.", and the agent tells their recording it records too |
-| [Vodafone: best iPhone deal](docs/stories/vodafone-iphone.md) | Calling out | A salesperson who wants the customer, not an assistant, and gets asked one question at a time anyway |
+| [Vodafone: best iPhone deal](docs/stories/vodafone-iphone.md) | Calling out, recorded | A salesperson who wants the customer, not an assistant, and gets asked one question at a time anyway |
 | [Paddle steamers in December](docs/stories/paddle-steamers.md) | Calling out | 88 seconds, and an answer no website had: one boat sold, one in survey |
 | [The pink wallet](docs/stories/lost-wallet.md) | Calling out | A voice robot and a transfer to the store, and what the agent used to say into the hold queue |
 | [Chasing a refund](docs/stories/refund-call.md) | Calling out | Reads fine on paper, sounded bad: the call behind most of the turn-taking fixes |
@@ -186,7 +186,7 @@ If you publish recordings made with it, a "Made with AI on the Line" line with a
 
 It has been making real calls from my home PBX for a few weeks: shops, a paddle steamer operator, a motel about a refund, three phone carriers' sales lines, and a lot of calls into its own screener. It's tested on one PBX (FreePBX 17), one trunk (Internode) and mostly one voice. Other setups will find things I haven't.
 
-The outgoing calls have transcripts in the stories for now; their recordings will follow. The screener recordings are me playing the caller.
+The Vodafone call has its recording; the other outgoing calls have transcripts in the stories for now, and their recordings will follow. The screener recordings are me playing the caller.
 
 What helps most is [test samples](docs/test-samples.md) of calls where the timing goes wrong, and reports from other PBXes and trunks. Asterisk is the only telephony backend so far. A backend that registers straight to a SIP account is the obvious next piece.
 

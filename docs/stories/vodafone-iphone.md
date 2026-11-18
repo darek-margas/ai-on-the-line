@@ -4,6 +4,10 @@ Three calls, one question: the best subsidised iPhone deal. [Optus](optus-iphone
 
 The third call, the same morning as [Telstra](telstra-iphone.md). Vodafone's contact page only offers chat and a "join Vodafone" button; its support pages give 1300 650 410 for anyone not calling from a Vodafone mobile.
 
+The whole call, levelled, with the spoken credit at the start. The voice bot, the recording notice, about a minute in the queue, and Roslina asking twice to speak to the customer:
+
+https://github.com/user-attachments/assets/6ca15089-fadf-490a-8e63-e58fa579b0b5
+
 ## Setup
 
 The brief from the second Telstra call with Vodafone's name in it. Two changes: the must-not also rules out mentioning a detail alongside another answer (the colour slipped out that way with Telstra), and the menu hint is generic, because I didn't know Vodafone's menu. It's a new number, so it waited for approval:
