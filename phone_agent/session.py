@@ -296,6 +296,19 @@ def answered_after_menu(text: str) -> bool:
     return not (RECORDING_HINT.search(text) or re.search(r"\b(press|option|hold|transfer|connecting|queue|menu)\b", text, re.I))
 
 
+# A person coming off a queue introduces themselves: "this is Sherry from the
+# sales team", "Ness speaking". A voice bot can too, but calls itself one.
+SELF_INTRO = re.compile(r"\b[Tt]his is [A-Z][a-z]+|\bspeaking\b|\bmy name(?:'s| is)\b")
+BOT_WORDS = re.compile(r"virtual|automated|digital assistant|\bbot\b|recording", re.I)
+
+
+def person_after_hold(text: str) -> bool:
+    """A long greeting from a person who just picked up our queued call: they
+    introduce themselves and offer help ("Good morning, welcome to Telstra, this
+    is Sherry from the sales team, how may I help you today?")."""
+    return bool(SELF_INTRO.search(text) and PERSON_CUE.search(text)) and not BOT_WORDS.search(text)
+
+
 def person_greeting(text: str, seconds: float) -> bool:
     """Someone picked up: a short first utterance, or a longer reception-style
     greeting ("Good morning, Harvey Norman, Josh speaking, how may I direct your
@@ -654,7 +667,8 @@ class CallSession:
                     continue
                 self._heard_since_we_spoke.extend(said)
                 after_hold = self._on_hold and not self._introduced()
-                if (self._just_pressed() or after_hold) and answered_after_menu(joined):
+                if ((self._just_pressed() or after_hold) and answered_after_menu(joined)) or (
+                        after_hold and person_after_hold(joined)):
                     # "Harvey Norman Moore Park" right after our key press, even garbled
                     # ("Have you no more, Pak?"), or "Hi, we're with Riverside" after
                     # hold tones: a person picked up. Answer at once.

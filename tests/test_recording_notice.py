@@ -104,3 +104,17 @@ def test_a_call_can_ask_for_a_longer_limit(tmp_path):
         return call
 
     assert asyncio.run(place()).schedule["max_seconds"] == 1800
+
+
+def test_a_person_off_the_queue_is_greeted_at_once():
+    from phone_agent.session import person_after_hold
+
+    # Telstra, 2026-11-18: these went to the model as "maybe a recording".
+    for person in ("good morning welcome to Telstra this is Sherry from the sales team based in  Adelaide how may I help you today",
+                   "Hello, welcome to Teltrack Consumer Sales Team Melbourne.  This is Ness. How can I help you today?"):
+        assert person_after_hold(person), person
+    for machine in ("In a sentence, please tell me how we can help you today.",
+                    "Hi, this is Telstra's virtual assistant. How can I help?",
+                    "Shop the latest device, gaming and tech accessories in the MyTelstra app.",
+                    "Our teams are helping other customers at the moment. The estimated wait time is 9 minutes."):
+        assert not person_after_hold(machine), machine
