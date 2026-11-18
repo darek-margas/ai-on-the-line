@@ -102,6 +102,7 @@ fi
 F_EXT=$ETC/$NAME-extensions.conf
 F_ARI=$ETC/$NAME-ari.conf
 F_AMI=$ETC/$NAME-manager.conf
+F_TEST=$ETC/$NAME-test.conf  # FreePBX: makes test extension 7990 dialable from phones
 
 # --- helpers -----------------------------------------------------------------
 
@@ -119,7 +120,9 @@ add_include() {  # add_include <file> <included file>
     elif [ "$DRY" = 1 ]; then
         echo "  would add to $1: $line"
     else
-        printf '\n; AI on the Line, added by setup-pbx.sh\n%s\n' "$line" >> "$1"
+        # No blank line: --uninstall deletes exactly these two lines and the file is as it was.
+        [ -s "$1" ] && [ "$(tail -c 1 "$1")" != "" ] && echo >> "$1"
+        printf '; AI on the Line, added by setup-pbx.sh\n%s\n' "$line" >> "$1"
         ok "added #include $(basename "$2") to $1"
     fi
 }
@@ -127,7 +130,7 @@ add_include() {  # add_include <file> <included file>
 remove_include() {
     [ -f "$1" ] || return 0
     if grep -q "$(basename "$2")" "$1"; then
-        run sed -i "\|^; AI on the Line, added by setup-pbx.sh\$|d; \|^#include $2\$|d; \|^include => ai-on-the-line-test\$|d" "$1" \
+        run sed -i "\|^; AI on the Line, added by setup-pbx.sh\$|{N;\|\n#include $2\$|d}" "$1" \
             && ok "removed the #include from $1"
     fi
 }
@@ -223,8 +226,9 @@ check() {
 
 if [ "$MODE" = uninstall ]; then
     step "Removing AI on the Line from this PBX"
-    remove_include "$INC_EXT" "$F_EXT"; remove_include "$INC_ARI" "$F_ARI"; remove_include "$INC_AMI" "$F_AMI"
-    for f in "$F_EXT" "$F_ARI" "$F_AMI"; do [ -f "$f" ] && run rm -f "$f" && ok "removed $f"; done
+    remove_include "$INC_EXT" "$F_EXT"; remove_include "$INC_EXT" "$F_TEST"
+    remove_include "$INC_ARI" "$F_ARI"; remove_include "$INC_AMI" "$F_AMI"
+    for f in "$F_EXT" "$F_TEST" "$F_ARI" "$F_AMI"; do [ -f "$f" ] && run rm -f "$f" && ok "removed $f"; done
     if [ "$FREEPBX" = 1 ]; then run fwconsole reload >/dev/null; else run asterisk -rx "core reload" >/dev/null; fi
     echo; echo "Left in place: $FINISH, $SAVED, recordings, and any NFS export. The HTTP/ARI settings are unchanged."
     exit 0
@@ -388,9 +392,9 @@ fi
 add_include "$INC_EXT" "$F_EXT"
 if [ "$SCREENER" = 1 ]; then
     if [ "$FREEPBX" = 1 ]; then
-        if grep -q "include => ai-on-the-line-test" $ETC/extensions_custom.conf 2>/dev/null; then ok "7990 already reachable from extensions"
-        elif [ "$DRY" = 1 ]; then echo "  would add [from-internal-custom] include => ai-on-the-line-test"
-        else printf '\n[from-internal-custom]\ninclude => ai-on-the-line-test\n' >> $ETC/extensions_custom.conf; ok "7990 reachable from extensions"; fi
+        printf '; AI on the Line: lets phones dial test extension 7990. Written by setup-pbx.sh.\n[from-internal-custom]\ninclude => ai-on-the-line-test\n' \
+            | write_file "$F_TEST" 640
+        add_include "$INC_EXT" "$F_TEST"
     else
         warn "add 'include => ai-on-the-line-test' to the context your phones use, to reach test extension 7990"
     fi
