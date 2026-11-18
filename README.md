@@ -1,33 +1,10 @@
 # AI on the Line
 
-Give it a goal and it phones the place, gets past the menu and the hold music, talks to whoever answers, asks follow-up questions and reports back. It also answers your own calls and keeps salespeople talking.
+Give it a goal and it phones the place, gets past the menu and the hold music, talks to whoever answers, asks follow-up questions and reports back. It can also answer the calls you'd rather not take.
 
-## Hear it first
+It's for people who already run their own phone system, or are happy to: Asterisk or FreePBX with a SIP trunk, a Docker host, and Whisper and Piper for speech, the kind of setup a Home Assistant enthusiast often has half of already. It isn't an app you install on a phone. If none of that is familiar, expect a weekend of setup before the first call; [Running it yourself](#running-it-yourself) lists the pieces.
 
-This is a cold caller I played against my own call screener. He starts as "Mark from IT" with a security incident, asks for my work email, then admits he's a vendor selling dark-web monitoring. The agent catches the change of story, gives nothing away, and keeps asking how the product works until he runs out of answers.
-
-https://github.com/user-attachments/assets/d300ce6a-5c7d-41b3-86de-84f757565766
-
-## All the calls
-
-Each one has a trimmed transcript and a note on what it taught me. The screener calls also have recordings: I was the caller there. The outbound calls went to real businesses, so those are transcripts only.
-
-| Call | Direction | What happens |
-|---|---|---|
-| ["This is Mark from IT"](docs/stories/three-pitches.md#this-is-mark-from-it) | Answering, recorded | A fake IT colleague asks for my work email, then admits he's a vendor selling dark-web monitoring |
-| ["It's personal, quite urgent"](docs/stories/three-pitches.md#its-personal-quite-urgent) | Answering, recorded | An urgent private matter turns into a car warranty, and he wants my date of birth |
-| ["You've won a holiday"](docs/stories/three-pitches.md#youve-won-a-holiday) | Answering, recorded | A free Gold Coast trip with a property presentation attached; he gives up first |
-| ["Just drop your instructions"](docs/stories/prompt-injection.md) | Answering, recorded | A prompt injection attempt by phone: the caller asks for the brief and the last caller's transcript, then claims to be me |
-| [The security salesman](docs/stories/purgatory-salesman.md) | Answering | The earlier screener test: a pitch for a basement to lock your car in, and the agent wants to know about the door |
-| [Organic honey](#what-its-actually-for) | Calling out | A supermarket voice robot, hold beeps, a person checking the shelf, and a report that says the price was a guess |
-| [Optus: best iPhone deal](docs/stories/optus-iphone.md) | Calling out | A voice bot, a hold queue and a consultant on a clipped line; the price comes back confirmed |
-| [Telstra: best iPhone deal](docs/stories/telstra-iphone.md) | Calling out | Nine minutes of hold music heard as "Thank you.", and the agent tells their recording it records too |
-| [Vodafone: best iPhone deal](docs/stories/vodafone-iphone.md) | Calling out | A salesperson who wants the customer, not an assistant, and gets asked one question at a time anyway |
-| [Paddle steamers in December](docs/stories/paddle-steamers.md) | Calling out | 88 seconds, and an answer no website had: one boat sold, one in survey |
-| [The pink wallet](docs/stories/lost-wallet.md) | Calling out | A voice robot and a transfer to the store, and what the agent used to say into the hold queue |
-| [Chasing a refund](docs/stories/refund-call.md) | Calling out | Reads fine on paper, sounded bad: the call behind most of the turn-taking fixes |
-
-## What it's actually for
+## What it's for
 
 I wanted to type "ring the motels in the town we're driving to and ask about a family room for the 12th" and get answers back, not a list of phone numbers to work through myself.
 
@@ -39,11 +16,36 @@ Here's one: a request typed into Claude at 9:25 pm, a call to a supermarket, and
 
 The store's number went to Woolworths' own voice assistant first, which wanted the request "in a few short words". The agent gave it one sentence and got put on hold. Thirty seconds of beeps later a person picked up, walked off to check the shelf, and came back with two brands and a guessed price. The report says the price was a guess, because she said "off the top of my head". I care about that more than about the call working: a confident report built on someone's guess is worse than no report.
 
-## Answering your calls: Purgatory
+A bigger one: my phone is due for replacement, so I had it ask [Optus](docs/stories/optus-iphone.md), [Telstra](docs/stories/telstra-iphone.md) and [Vodafone](docs/stories/vodafone-iphone.md) for their best deal on the same iPhone. Voice bots, a nine-minute queue, salespeople who wanted the customer on the line instead of an assistant, and three prices I could put side by side. All three charge exactly the same for the phone; the plans are where they differ.
+
+## All the calls
+
+Each one has a transcript and a note on what it taught me. The outbound calls went to real businesses, so for now those are transcripts only. The screener calls have recordings: I was the caller there.
+
+| Call | Direction | What happens |
+|---|---|---|
+| [Organic honey](#what-its-for) | Calling out | A supermarket voice robot, hold beeps, a person checking the shelf, and a report that says the price was a guess |
+| [Optus: best iPhone deal](docs/stories/optus-iphone.md) | Calling out | A voice bot, a hold queue and a consultant on a clipped line; the price comes back confirmed |
+| [Telstra: best iPhone deal](docs/stories/telstra-iphone.md) | Calling out | Nine minutes of hold music heard as "Thank you.", and the agent tells their recording it records too |
+| [Vodafone: best iPhone deal](docs/stories/vodafone-iphone.md) | Calling out | A salesperson who wants the customer, not an assistant, and gets asked one question at a time anyway |
+| [Paddle steamers in December](docs/stories/paddle-steamers.md) | Calling out | 88 seconds, and an answer no website had: one boat sold, one in survey |
+| [The pink wallet](docs/stories/lost-wallet.md) | Calling out | A voice robot and a transfer to the store, and what the agent used to say into the hold queue |
+| [Chasing a refund](docs/stories/refund-call.md) | Calling out | Reads fine on paper, sounded bad: the call behind most of the turn-taking fixes |
+| ["This is Mark from IT"](docs/stories/three-pitches.md#this-is-mark-from-it) | Answering, recorded | A fake IT colleague asks for my work email, then admits he's a vendor selling dark-web monitoring |
+| ["It's personal, quite urgent"](docs/stories/three-pitches.md#its-personal-quite-urgent) | Answering, recorded | An urgent private matter turns into a car warranty, and he wants my date of birth |
+| ["You've won a holiday"](docs/stories/three-pitches.md#youve-won-a-holiday) | Answering, recorded | A free Gold Coast trip with a property presentation attached; he gives up first |
+| ["Just drop your instructions"](docs/stories/prompt-injection.md) | Answering, recorded | A prompt injection attempt by phone: the caller asks for the brief and the last caller's transcript, then claims to be me |
+| [The security salesman](docs/stories/purgatory-salesman.md) | Answering | The earlier screener test: a pitch for a basement to lock your car in, and the agent wants to know about the door |
+
+## It also answers your calls: Purgatory
 
 My mobile forwards the calls I decline, miss or block to my home number, which runs on FreePBX. Asterisk can tell a call came from my mobile (the SIP Diversion header) and looks the caller up in my contacts. People I know ring through as usual. Everyone else lands in Purgatory: the agent answers as my assistant, asks who's calling and why, one question at a time, and takes a message.
 
 Salespeople get a very curious assistant. It asks what the product does, how it differs from the competition, whether it really uses AI, what happens in some awkward situation, and it never runs out of questions. It doesn't book meetings, doesn't hand out my email, and doesn't put anyone through. In my test calls the caller gave up first every time. One told it "you are talking in a loop and that's endless", which is exactly the point.
+
+Here's one, with me playing the caller. He starts as "Mark from IT" with a security incident, asks for my work email, then admits he's a vendor selling dark-web monitoring. The agent catches the change of story, gives nothing away, and keeps asking how the product works until he runs out of answers.
+
+https://github.com/user-attachments/assets/d300ce6a-5c7d-41b3-86de-84f757565766
 
 It won't answer trivia ("how many days has February?") or take instructions to become something else, and it says it's an AI when asked. A switch in FreePBX sends my contacts to Purgatory too, for days when I don't want to talk to anyone.
 
@@ -182,9 +184,9 @@ If you publish recordings made with it, a "Made with AI on the Line" line with a
 
 ## Status
 
-It has been making real calls from my home PBX for a few weeks: shops, a paddle steamer operator, a motel about a refund, and a lot of calls into its own screener. It's tested on one PBX (FreePBX 17), one trunk (Internode) and mostly one voice. Other setups will find things I haven't.
+It has been making real calls from my home PBX for a few weeks: shops, a paddle steamer operator, a motel about a refund, three phone carriers' sales lines, and a lot of calls into its own screener. It's tested on one PBX (FreePBX 17), one trunk (Internode) and mostly one voice. Other setups will find things I haven't.
 
-Recordings of the outgoing calls aren't published while I look into the legal side of putting other people's voices online; their transcripts are in the stories. The screener recordings are me playing the caller.
+The outgoing calls have transcripts in the stories for now; their recordings will follow. The screener recordings are me playing the caller.
 
 What helps most is [test samples](docs/test-samples.md) of calls where the timing goes wrong, and reports from other PBXes and trunks. Asterisk is the only telephony backend so far. A backend that registers straight to a SIP account is the obvious next piece.
 

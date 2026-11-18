@@ -2,13 +2,7 @@
 
 Real calls, with transcripts trimmed and personal details taken out. Each one taught me something about how phone conversations actually go.
 
-[Three pitches against the screener](three-pitches.md) is the best place to start. I rang the call screener three times as the kind of cold caller I actually get: an "urgent personal matter" that turns into a car warranty, "Mark from IT" who turns into a security vendor, and a free holiday with a property presentation attached.
-
-[Purgatory and the security salesman](purgatory-salesman.md) is the earlier round of the same test, with a pitch that makes no sense at all.
-
-[Talking the screener out of its brief](prompt-injection.md) is me trying prompt injection by phone: asking it to drop its instructions, read out its brief and the last call, and claiming to be the owner.
-
-Three sales calls, one question: the best subsidised deal on an iPhone 18 from [Optus](optus-iphone.md), [Telstra](telstra-iphone.md) and [Vodafone](vodafone-iphone.md). Voice bots, a nine-minute queue that speech recognition heard as "Thank you." eighteen times, salespeople who wanted the customer on the line, and the same phone price from all three. Each page has the brief, the transcript, and what went well and what didn't. The Telstra one is where the recording notice came from.
+Start with the three sales calls. One question, the best subsidised deal on an iPhone 18, put to [Optus](optus-iphone.md), [Telstra](telstra-iphone.md) and [Vodafone](vodafone-iphone.md). Voice bots, a nine-minute queue that speech recognition heard as "Thank you." eighteen times, salespeople who wanted the customer on the line, and the same phone price from all three. Each page has the brief, the transcript, and what went well and what didn't. The Telstra one is where the recording notice came from.
 
 [Paddle steamers in December](paddle-steamers.md) is one of the first real calls where I needed the answer. Ninety seconds, and it came back with something no website said.
 
@@ -18,7 +12,13 @@ Three sales calls, one question: the best subsidised deal on an iPhone 18 from [
 
 The organic honey call is in the main [README](../../README.md).
 
-Recordings are published only for the screener calls, where I was the caller. The outgoing calls went to real businesses, and I'm not publishing those recordings while I look into the legal side of putting someone's voice online, so for those there are transcripts only.
+The call screener, Purgatory, answers the calls I'd rather not take. [Three pitches against the screener](three-pitches.md) is the best of those. I rang it three times as the kind of cold caller I actually get: an "urgent personal matter" that turns into a car warranty, "Mark from IT" who turns into a security vendor, and a free holiday with a property presentation attached.
+
+[Purgatory and the security salesman](purgatory-salesman.md) is the earlier round of the same test, with a pitch that makes no sense at all.
+
+[Talking the screener out of its brief](prompt-injection.md) is me trying prompt injection by phone: asking it to drop its instructions, read out its brief and the last call, and claiming to be the owner.
+
+The screener calls have recordings: I was the caller. The outgoing calls have transcripts for now; their recordings will follow.
 
 ---
 
