@@ -86,11 +86,9 @@ flowchart TB
   you -->|HTTP| web
   mcp --> mgr
   web --> mgr
-  mgr -->|"ARI: originate, hang up"| asterisk
-  asterisk -->|"POST /inbound (incoming calls)"| mgr
   mgr --> session
-  asterisk <-->|"AudioSocket, 16 kHz"| turn
-  turn -->|"AMI: keypresses"| asterisk
+  mgr -->|ARI| asterisk
+  turn <-->|"AudioSocket audio, AMI keys"| asterisk
   turn <--> speech
   speech <--> wyoming
   turn <--> model
@@ -100,7 +98,7 @@ flowchart TB
 
 There are two models in this, and they never meet. The Claude you talk to writes a brief, calls `place_call` and later reads the result with `get_call`; it's not on the call. The call itself is run by the in-call model (`DIALOG_LLM`, and `INBOUND_DIALOG_LLM` for the screener), which gets the brief, the transcript so far and the answers collected, and streams back what to say. It's only asked when something needs an answer. Speech detection, hold music, menus, the opening line, fillers and the recording notice are handled without it, so a queue full of "Thank you." from speech recognition costs no model turns.
 
-The container also serves a small web page with every call, its transcript, answers and recording, and the Approve button for calls that need it. Asterisk does the telephony: it places the call through your normal outbound routes, records it, and streams the audio to the container.
+The container also serves a small web page with every call, its transcript, answers and recording, and the Approve button for calls that need it. Asterisk does the telephony: it places the call through your normal outbound routes, records it, and streams the audio to the container. An incoming call goes the other way: the dialplan registers it with a POST to `/inbound`, then connects the audio.
 
 One outgoing call, from brief to report. This is roughly what the [Telstra call](docs/stories/telstra-iphone.md) looked like:
 
