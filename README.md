@@ -63,15 +63,82 @@ It never books, pays or agrees to anything. "Would you like me to book that now?
 
 ## How it fits together
 
-```
-Claude (Code / Desktop) ──MCP──► ai-on-the-line container ──ARI──► Asterisk / FreePBX ──► SIP trunk ──► PSTN
-                                     │  ▲  AudioSocket, 16 kHz audio both ways
-                                     ▼  │
-                          Whisper (STT) and Piper (TTS) over Wyoming,
-                          Claude or a local model through Ollama for the conversation
+```mermaid
+flowchart TB
+  claude["Claude (Code / Desktop)<br/>writes the brief, reads the report"]
+  you["You, in a browser<br/>approve, read, listen"]
+  subgraph container["ai-on-the-line container"]
+    mcp["MCP tools<br/>place_call, get_call, hang_up"]
+    web["Web page<br/>calls, approval, recordings"]
+    mgr["Call manager<br/>approval, calling hours, queue"]
+    subgraph session["Call session, one per call"]
+      turn["Turn-taking<br/>speech detection, hold, menus,<br/>pre-rendered lines"]
+      speech["Speech"]
+      model["In-call model<br/>one turn at a time"]
+    end
+  end
+  asterisk["Asterisk / FreePBX"]
+  wyoming["Whisper and Piper<br/>over Wyoming"]
+  llm["Claude API or Ollama"]
+  pstn["SIP trunk, phone network"]
+
+  claude -->|MCP| mcp
+  you -->|HTTP| web
+  mcp --> mgr
+  web --> mgr
+  mgr -->|"ARI: originate, hang up"| asterisk
+  asterisk -->|"POST /inbound (incoming calls)"| mgr
+  mgr --> session
+  asterisk <-->|"AudioSocket, 16 kHz"| turn
+  turn -->|"AMI: keypresses"| asterisk
+  turn <--> speech
+  speech <--> wyoming
+  turn <--> model
+  model <--> llm
+  asterisk <--> pstn
 ```
 
-The container exposes MCP tools (`place_call`, `get_call`, `list_calls`, `hang_up`, `check_setup`) and a small web page with every call, its transcript, answers and recording. Asterisk does the telephony: it places the call through your normal outbound routes, records it, and streams the audio to the container.
+There are two models in this, and they never meet. The Claude you talk to writes a brief, calls `place_call` and later reads the result with `get_call`; it's not on the call. The call itself is run by the in-call model (`DIALOG_LLM`, and `INBOUND_DIALOG_LLM` for the screener), which gets the brief, the transcript so far and the answers collected, and streams back what to say. It's only asked when something needs an answer. Speech detection, hold music, menus, the opening line, fillers and the recording notice are handled without it, so a queue full of "Thank you." from speech recognition costs no model turns.
+
+The container also serves a small web page with every call, its transcript, answers and recording, and the Approve button for calls that need it. Asterisk does the telephony: it places the call through your normal outbound routes, records it, and streams the audio to the container.
+
+One outgoing call, from brief to report. This is roughly what the [Telstra call](docs/stories/telstra-iphone.md) looked like:
+
+```mermaid
+sequenceDiagram
+  participant C as Claude
+  participant Y as You
+  participant A as ai-on-the-line
+  participant M as In-call model
+  participant P as Asterisk
+  participant L as Their line
+  C->>A: place_call with the brief
+  A-->>C: call id and page link
+  Y->>A: Approve on the call page
+  A->>M: warm up, pre-render the opening
+  A->>P: ARI originate
+  P->>L: dial through the trunk
+  L-->>P: answered
+  P->>A: AudioSocket connects
+  L->>A: "This call is being recorded."
+  A->>L: "This call is being recorded on our side as well." (pre-rendered)
+  L->>A: menu: "press 1 for yes or 2 for no"
+  A->>M: transcript so far
+  M-->>A: press 2
+  A->>P: AMI keypress
+  Note over A,L: Hold: music and promotions are filtered out, the model isn't asked
+  L->>A: "This is Sherry from the sales team, how may I help?"
+  A->>L: opening line (pre-rendered)
+  loop each turn
+    L->>A: speech, transcribed by Whisper
+    A->>M: brief, transcript, answers so far
+    M-->>A: reply, streamed sentence by sentence
+    A->>L: spoken by Piper
+  end
+  A->>P: hang up
+  C->>A: get_call
+  A-->>C: answers, notes, transcript, page link
+```
 
 Asterisk is the only telephony backend today. The conversation code only needs audio in and out, keypresses and hang-up, so a backend that registers straight to a SIP account is a reasonable next step.
 
