@@ -75,8 +75,8 @@ ok()   { printf '  \033[32mok\033[0m    %s\n' "$*"; }
 warn() { printf '  \033[33mwarn\033[0m  %s\n' "$*"; WARNINGS=$((WARNINGS + 1)); }
 bad()  { printf '  \033[31mfail\033[0m  %s\n' "$*"; FAILURES=$((FAILURES + 1)); }
 step() { printf '\n%s\n' "$*"; }
-run()  { if [ "$DRY" = 1 ]; then echo "  would run: $*"; else "$@"; fi; }
-WARNINGS=0 FAILURES=0
+run()  { if [ "$DRY" = 1 ]; then echo "  would run: $*" >&2; return 1; else "$@"; fi; }  # dry: never "ok"
+WARNINGS=0 FAILURES=0 MANUAL=0
 
 [ "$(id -u)" = 0 ] || { echo "Run this as root on the PBX." >&2; exit 1; }
 command -v asterisk >/dev/null || { echo "Asterisk isn't installed here." >&2; exit 1; }
@@ -127,8 +127,8 @@ add_include() {  # add_include <file> <included file>
 remove_include() {
     [ -f "$1" ] || return 0
     if grep -q "$(basename "$2")" "$1"; then
-        run sed -i "\|^; AI on the Line, added by setup-pbx.sh\$|d; \|^#include $2\$|d; \|^include => ai-on-the-line-test\$|d" "$1"
-        ok "removed the #include from $1"
+        run sed -i "\|^; AI on the Line, added by setup-pbx.sh\$|d; \|^#include $2\$|d; \|^include => ai-on-the-line-test\$|d" "$1" \
+            && ok "removed the #include from $1"
     fi
 }
 
@@ -143,6 +143,14 @@ write_file() {  # write_file <path> <mode>; content on stdin
     ok "wrote $1"
 }
 
+in_trusted() {  # is the address inside one of the firewall's trusted networks?
+    fwconsole firewall list trusted 2>/dev/null | grep -oE '[0-9.]+(/[0-9]+)?' | python3 -c '
+import ipaddress, sys
+ip = ipaddress.ip_address(sys.argv[1])
+sys.exit(0 if any(ip in ipaddress.ip_network(n.strip(), strict=False) for n in sys.stdin if n.strip()) else 1)
+' "$1" 2>/dev/null
+}
+
 context_elsewhere() {  # is [ctx] defined in a dialplan file that isn't ours?
     grep -lE "^\[$1\]" $ETC/extensions*.conf 2>/dev/null | grep -v "$F_EXT" | head -1
 }
@@ -152,7 +160,10 @@ context_elsewhere() {  # is [ctx] defined in a dialplan file that isn't ours?
 check() {
     step "Asterisk"
     if [ "${AST_MAJOR:-0}" -ge 18 ] 2>/dev/null; then ok "Asterisk $AST_VERSION"; else bad "Asterisk $AST_VERSION: 18 or newer is needed for AudioSocket"; fi
-    [ "$FREEPBX" = 1 ] && ok "FreePBX $(fwconsole -V 2>/dev/null | sed -n 's/.*\([0-9][0-9]*\.[0-9.]*\).*/\1/p' | head -1)"
+    [ "$FREEPBX" = 1 ] && ok "FreePBX $(fwconsole -V 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | tail -1)"
+    if [ -n "$(context_elsewhere phone-agent)" ]; then
+        MANUAL=1; ok "[phone-agent] is set up by hand in $(context_elsewhere phone-agent); checking that setup"
+    fi
 
     for m in res_audiosocket chan_audiosocket; do
         if ast "module show like $m" | grep -q "$m.so"; then ok "$m loaded"
@@ -165,14 +176,22 @@ check() {
     local http; http=$(ast "http show status")
     if echo "$http" | grep -q "Server Enabled"; then
         ok "HTTP server: $(echo "$http" | sed -n 's/.*Server Enabled and Bound to \(.*\)/\1/p' | head -1)"
-        echo "$http" | grep -q "Bound to 127.0.0.1" && bad "HTTP only listens on 127.0.0.1: the agent's host can't reach ARI"
+        echo "$http" | grep "^Server Enabled" | grep -q "Bound to 127.0.0.1" && bad "HTTP only listens on 127.0.0.1: the agent's host can't reach ARI"
         echo "$http" | grep -q "/ari/" && ok "ARI is served" || bad "ARI isn't served over HTTP"
         echo "$http" | grep -q "/rawman" && ok "AMI over HTTP (/rawman) is served" || warn "AMI over HTTP isn't served: keypresses fall back to in-band tones (manager.conf: webenabled = yes)"
     else
         bad "Asterisk's HTTP server isn't running"
     fi
-    if ast "ari show users" | grep -qw "$NAME"; then ok "ARI user $NAME exists"; else bad "no ARI user $NAME"; fi
-    if ast "manager show user $NAME" | grep -q "username: $NAME"; then ok "AMI user $NAME exists"; else warn "no AMI user $NAME"; fi
+    local ari_users; ari_users=$(ast "ari show users" | awk 'NR > 2 {print $NF}' | paste -sd, -)
+    if ast "ari show users" | grep -qw "$NAME"; then ok "ARI user $NAME exists"
+    elif [ "$MANUAL" = 1 ] && [ -n "$ari_users" ]; then ok "ARI users: $ari_users (the agent's .env names the one it uses)"
+    else bad "no ARI user $NAME"; fi
+    if ast "manager show user $NAME" | grep -q "username: $NAME"; then ok "AMI user $NAME exists"
+    elif [ "$MANUAL" = 1 ]; then
+        # FreePBX has a dozen AMI users of its own; show the ones that look like the agent's.
+        local mine; mine=$(ast "manager show users" | awk 'NF == 1 && $1 !~ /^-/ && $1 != "username" {print $1}' | grep -iE 'agent|ai-on-the-line' | paste -sd, -)
+        [ -n "$mine" ] && ok "AMI user: $mine (the agent's .env names the one it uses)" || warn "no AMI user for the agent: keypresses fall back to in-band tones"
+    else warn "no AMI user $NAME: keypresses fall back to in-band tones"; fi
 
     step "Dialplan"
     if ast "dialplan show phone-agent" | grep -q "AudioSocket"; then ok "[phone-agent] context loaded"; else bad "[phone-agent] context not loaded"; fi
@@ -187,7 +206,8 @@ check() {
     step "Recordings"
     local mon=/var/spool/asterisk/monitor
     [ -d "$mon/phone-agent" ] && ok "$mon/phone-agent exists ($(ls "$mon/phone-agent" 2>/dev/null | grep -c '\.wav$') files)" || ok "$mon/phone-agent will be created by the first call"
-    if command -v exportfs >/dev/null && exportfs -v 2>/dev/null | grep -q "$mon"; then ok "NFS export of $mon: $(exportfs -v | grep "$mon" | awk '{print $2}' | head -1)"
+    if command -v exportfs >/dev/null && exportfs -v 2>/dev/null | grep -q "$mon"; then
+        ok "NFS export of $mon to $(exportfs -v | tr -s ' \t\n' ' ' | grep -oE "$mon [^ (]+" | head -1 | cut -d' ' -f2)"
     else ok "no NFS export of $mon (optional: --nfs, or see the guide)"; fi
 
     if [ -n "$AGENT_HOST" ]; then
@@ -227,7 +247,9 @@ if [ "$SCREENER" = 1 ] && [ -z "$TOKEN" ]; then TOKEN=$(saved PHONE_AGENT_TOKEN)
 
 for ctx in phone-agent phone-agent-inbound; do
     other=$(context_elsewhere "$ctx")
-    if [ -n "$other" ]; then
+    if [ -n "$other" ] && [ "$DRY" = 1 ] && [ "${SHOW_PLAN:-}" = 1 ]; then
+        echo "  [$ctx] is already defined in $other: a real run would stop here (SHOW_PLAN=1 shows the plan anyway)"
+    elif [ -n "$other" ]; then
         echo "[$ctx] is already defined in $other. Remove it there first (it looks like a manual setup), or keep the manual setup and skip this script." >&2
         exit 1
     fi
@@ -240,7 +262,7 @@ AMI_PASS=$(saved AMI_PASSWORD); [ -n "$AMI_PASS" ] || AMI_PASS=$(newpass)
 PBX_ADDR=$(ip route get "$AGENT_IP" 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)
 [ -n "$PBX_ADDR" ] || PBX_ADDR=$(hostname -I | awk '{print $1}')
 
-echo "AI on the Line PBX setup v$VERSION: $([ "$FREEPBX" = 1 ] && echo FreePBX || echo plain Asterisk) $AST_VERSION, agent at $AGENT_HOST ($AGENT_IP)$([ "$DRY" = 1 ] && echo ', dry run')"
+echo "AI on the Line PBX setup v$VERSION: Asterisk $AST_VERSION$([ "$FREEPBX" = 1 ] && echo " with FreePBX"), agent at $AGENT_HOST ($AGENT_IP)$([ "$DRY" = 1 ] && echo ', dry run')"
 
 step "Modules"
 for m in res_audiosocket chan_audiosocket; do
@@ -257,9 +279,10 @@ step "HTTP and ARI"
 if [ "$FREEPBX" = 1 ]; then
     for kv in HTTPENABLED=1 HTTPBINDADDRESS=0.0.0.0 ENABLE_ARI=1; do
         k=${kv%%=*}; v=${kv#*=}
-        cur=$(fwconsole setting "$k" 2>/dev/null | sed -n 's/.*: *//p' | tail -1)
+        cur=$(fwconsole setting "$k" 2>/dev/null | sed -n 's/.*\[\(.*\)\].*/\1/p' | tail -1)
         if [ "$cur" = "$v" ] || { [ "$k" != HTTPBINDADDRESS ] && [ "$cur" = true ]; }; then ok "$k already $cur"
-        elif run fwconsole setting "$k" "$v" >/dev/null 2>&1; then ok "set $k to $v (was ${cur:-unset})"
+        elif [ "$DRY" = 1 ]; then echo "  would set $k to $v (now ${cur:-unset})"
+        elif fwconsole setting "$k" "$v" >/dev/null 2>&1; then ok "set $k to $v (was ${cur:-unset})"
         else warn "couldn't set $k: set it in Settings > Advanced Settings"; fi
     done
 else
@@ -383,7 +406,7 @@ run install -d -m 775 -o asterisk -g asterisk /var/spool/asterisk/monitor/phone-
 
 if [ "$FREEPBX" = 1 ] && fwconsole firewall list trusted >/dev/null 2>&1; then
     step "FreePBX firewall"
-    if fwconsole firewall list trusted 2>/dev/null | grep -qw "$AGENT_IP"; then ok "$AGENT_IP is already trusted"
+    if in_trusted "$AGENT_IP"; then ok "$AGENT_IP is already in the Trusted zone"
     else run fwconsole firewall trust "$AGENT_IP" >/dev/null && ok "trusted $AGENT_IP (ARI, AMI and NFS from the agent's host)"; fi
 fi
 
@@ -426,6 +449,10 @@ $([ "$SCREENER" = 1 ] && echo "PHONE_AGENT_TOKEN=$TOKEN")
 EOF
 fi
 
+if [ "$DRY" = 1 ]; then
+    echo; echo "Dry run: nothing was changed. Run it again without --dry-run to apply."
+    exit 0
+fi
 check
 printf '\n%d failed, %d warnings.\n' "$FAILURES" "$WARNINGS"
 if [ "$DRY" = 0 ]; then
