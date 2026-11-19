@@ -533,6 +533,23 @@ class CallSession:
                 answered = True
                 pcm = item[0]
                 text = await self._heard(item)
+                if text and is_hold_sound(text):
+                    # "Beep." before a voice bot or menu: a tone, not someone
+                    # answering. Wait for real first words, or introduce into silence.
+                    log.info("call %s: tone %r after answer, not a person; waiting", call.id, text)
+                    answered = False
+                    first = await self._first_words()
+                    if first is HANGUP:
+                        call.set_outcome(self._hangup_outcome())
+                        return
+                    if first is None:
+                        answered = True
+                        await self._say(call.brief.opening_line)
+                        if await self._follow_intro():
+                            return
+                    else:
+                        self.utterances.put_nowait(first)
+                    continue
                 if text and person_greeting(text, len(pcm) / (self.rate * 2)):
                     # Plain "Hello?" / "Flower Power, Jordan speaking": answer at once.
                     await self._say(opening_lines(call.brief.opening_line)[asks_how_we_are(text)])

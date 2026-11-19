@@ -1080,3 +1080,55 @@ async def test_hours_are_checked_again_before_dialling(tmp_path):
     call = manager.start_call("0255500000", brief)
     await asyncio.wait_for(call.done.wait(), 10)
     assert dialled == [] and call.status == "failed" and "calling hours" in call.error
+
+
+@pytest.mark.asyncio
+async def test_beep_before_voice_bot_is_not_a_person(tmp_path):
+    """Apple: a 'Beep.' right after answer, then the recorded greeting. The beep
+    gets no opening line; the dialog sees the recording as the first words."""
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    speech = ScriptedSpeech([
+        "Beep.",
+        "Thanks for calling Apple. Calls are recorded for evaluation purposes. I'm an automated system. How can I help you?",
+    ])
+    dialog = ScriptedDialog([Turn(say="I'd like to buy a new iPhone.", end_call=True, outcome="completed")])
+    manager = CallManager(cfg, db, speech, dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    ari = BurstAri(server.sockets[0].getsockname()[1], [15, 250])
+    manager.ari = ari
+
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    try:
+        brief = Brief(goal="iPhone prices", callee="Apple", opening_line="Hi, I'm Darek's assistant. Do you sell iPhones on plans?",
+                      questions={"plans": "plans or not"})
+        call = manager.start_call("0285550000", brief)
+        await asyncio.wait_for(call.done.wait(), 60)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+
+    saved = db.get_call(call.id)
+    agent = [text for who, text in saved["transcript"] if who == "agent"]
+    assert agent[0] == "I'd like to buy a new iPhone." and brief.opening_line not in agent, saved["transcript"]
+    assert dialog.events[0].startswith("The call was just answered")
+
+
+def test_held_back_details():
+    from phone_agent.dialog import held_back_leaks, held_back_values
+
+    may_share = [
+        "Darek's first name",
+        "Which iPhone 18 model, only when asked: the Pro Max",
+        "Storage, only when asked: 256 gigabytes",
+        "His current phone, when trade-in comes up or they ask: an iPhone 17 Pro Max",
+    ]
+    assert held_back_values(may_share) == ["Pro Max", "256 gigabytes"]
+    leaky = Brief(goal="Best deal on the Pro Max 256 gigabytes", callee="Apple",
+                  opening_line="Hi, I'm Darek's assistant.", questions={"q": "q"}, may_share=may_share)
+    assert held_back_leaks(leaky) == ["goal says 'Pro Max'", "goal says '256 gigabytes'"]
+    clean = Brief(goal="Best deal on an iPhone 18", callee="Apple",
+                  opening_line="Hi, I'm Darek's assistant.", questions={"q": "q"}, may_share=may_share)
+    assert held_back_leaks(clean) == []

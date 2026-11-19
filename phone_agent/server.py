@@ -25,7 +25,7 @@ from .config import Config
 from .credit import SPOKEN_CREDIT, credit_line, with_credit
 from .db import Database
 from .dialing import normalize_number
-from .dialog import DEFAULT_MUST_NOT, Brief, Dialog
+from .dialog import DEFAULT_MUST_NOT, Brief, Dialog, held_back_leaks
 from .sample import call_sample
 from .speech import Speech
 
@@ -154,7 +154,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             goal: One or two sentences: what this call should achieve.
             opening_line: First thing the agent says after they answer. Must introduce it as the owner's assistant (e.g. "Hi, I'm Alex's assistant") and say why it's calling.
             questions: What to get answered. Keep it to the essentials.
-            may_share: Facts the agent may tell the callee (dates, party size, the owner's name, callback number...).
+            may_share: Facts the agent may tell the callee (dates, party size, the owner's name, callback number...). For a detail it should give only if asked, write "<what it is>, only when asked: <value>", e.g. "Model, only when asked: the Pro Max", and keep that value out of goal and opening_line.
             must_not: Extra things the agent must never do. Booking, paying and committing are always forbidden.
             context: Background that helps the agent handle follow-up questions.
             callee_timezone: IANA zone if the callee isn't in the default zone, for the calling-hours check.
@@ -219,6 +219,11 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             context=context,
             recording_notice=cfg.recording_notice if recording_notice is None else recording_notice,
         )
+        if leaks := held_back_leaks(brief):
+            return {
+                "error": "may_share holds these back until the callee asks, but the agent reads the goal and "
+                f"opening line every turn and repeats them: {'; '.join(leaks)}. Leave them out of both.",
+            }
         try:
             call = manager.start_call(phone, brief, due, zone.key, ignore_calling_hours, approved_by,
                                       max_seconds=max_minutes * 60 if max_minutes else None)
