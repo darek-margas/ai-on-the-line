@@ -16,7 +16,7 @@ Here's one: a request typed into Claude at 9:25 pm, a call to a supermarket, and
 
 The store's number went to Woolworths' own voice assistant first, which wanted the request "in a few short words". The agent gave it one sentence and got put on hold. Thirty seconds of beeps later a person picked up, walked off to check the shelf, and came back with two brands and a guessed price. The report says the price was a guess, because she said "off the top of my head". I care about that more than about the call working: a confident report built on someone's guess is worse than no report.
 
-A bigger one: my phone is due for replacement, so I had it ask [Optus](docs/stories/optus-iphone.md), [Telstra](docs/stories/telstra-iphone.md) and [Vodafone](docs/stories/vodafone-iphone.md) for their best deal on the same iPhone. Voice bots, a nine-minute queue, salespeople who wanted the customer on the line instead of an assistant, and three prices I could put side by side. All three charge exactly the same for the phone; the plans are where they differ.
+A bigger one: my phone is due for replacement, so I had it ask [Optus](docs/stories/optus-iphone.md), [Telstra](docs/stories/telstra-iphone.md) and [Vodafone](docs/stories/vodafone-iphone.md) for their best deal on the same iPhone. Voice bots, a nine-minute queue, salespeople who wanted the customer on the line instead of an assistant, and three prices I could put side by side. All three charge exactly the same for the phone; the plans are where they differ. Then I had it ask [Apple](docs/stories/apple-iphone.md) whether it sells the phone on a plan. It doesn't, by phone at least, but it quoted a trade-in for my current phone, which none of the carriers did.
 
 ## All the calls
 
@@ -28,6 +28,7 @@ Each one has a transcript and a note on what it taught me. The Telstra and Vodaf
 | [Optus: best iPhone deal](docs/stories/optus-iphone.md) | Calling out | A voice bot, a hold queue and a consultant on a clipped line; the price comes back confirmed |
 | [Telstra: best iPhone deal](docs/stories/telstra-iphone.md) | Calling out, recorded | Nine minutes of hold music heard as "Thank you.", and the agent tells their recording it records too |
 | [Vodafone: best iPhone deal](docs/stories/vodafone-iphone.md) | Calling out, recorded | A salesperson who wants the customer, not an assistant, and gets asked one question at a time anyway |
+| [Apple: subsidised iPhones?](docs/stories/apple-iphone.md) | Calling out | No plans by phone, a trade-in quote without the serial number, and a beep the agent took for a person |
 | [Paddle steamers in December](docs/stories/paddle-steamers.md) | Calling out | 88 seconds, and an answer no website had: one boat sold, one in survey |
 | [The pink wallet](docs/stories/lost-wallet.md) | Calling out | A voice robot and a transfer to the store, and what the agent used to say into the hold queue |
 | [Chasing a refund](docs/stories/refund-call.md) | Calling out | Reads fine on paper, sounded bad: the call behind most of the turn-taking fixes |
@@ -186,7 +187,7 @@ If you publish recordings made with it, a "Made with AI on the Line" line with a
 
 It has been making real calls from my home PBX for a few weeks: shops, a paddle steamer operator, a motel about a refund, three phone carriers' sales lines, and a lot of calls into its own screener. It's tested on one PBX (FreePBX 17), one trunk (Internode) and mostly one voice. Other setups will find things I haven't.
 
-The Telstra and Vodafone calls have recordings; the Optus call has a transcript in its story for now, and its recording will follow. The screener recordings are me playing the caller.
+The Telstra and Vodafone calls have recordings; the Optus call has a transcript in its story for now, and its recording will follow. The Apple call stays a transcript: our recording notice never played on it, and I only publish recordings of calls where the other side heard that we record. The screener recordings are me playing the caller.
 
 What helps most is [test samples](docs/test-samples.md) of calls where the timing goes wrong, and reports from other PBXes and trunks. Asterisk is the only telephony backend so far. A backend that registers straight to a SIP account is the obvious next piece.
 

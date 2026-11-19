@@ -2,7 +2,7 @@
 
 Real calls, with transcripts trimmed and personal details taken out. Each one taught me something about how phone conversations actually go.
 
-Start with the three sales calls. One question, the best subsidised deal on an iPhone 18, put to [Optus](optus-iphone.md), [Telstra](telstra-iphone.md) and [Vodafone](vodafone-iphone.md). Voice bots, a nine-minute queue that speech recognition heard as "Thank you." eighteen times, salespeople who wanted the customer on the line, and the same phone price from all three. Each page has the brief, the transcript, and what went well and what didn't. The Telstra one is where the recording notice came from.
+Start with the three sales calls. One question, the best subsidised deal on an iPhone 18, put to [Optus](optus-iphone.md), [Telstra](telstra-iphone.md) and [Vodafone](vodafone-iphone.md). Voice bots, a nine-minute queue that speech recognition heard as "Thank you." eighteen times, salespeople who wanted the customer on the line, and the same phone price from all three. Each page has the brief, the transcript, and what went well and what didn't. The Telstra one is where the recording notice came from. [Apple](apple-iphone.md) came after: does it sell the phone on a plan itself? No, but it quoted a trade-in.
 
 [Paddle steamers in December](paddle-steamers.md) is one of the first real calls where I needed the answer. Ninety seconds, and it came back with something no website said.
 
@@ -18,7 +18,7 @@ The call screener, Purgatory, answers the calls I'd rather not take. [Three pitc
 
 [Talking the screener out of its brief](prompt-injection.md) is me trying prompt injection by phone: asking it to drop its instructions, read out its brief and the last call, and claiming to be the owner.
 
-The screener calls have recordings: I was the caller. The Telstra and Vodafone calls have recordings; the Optus call has a transcript for now, and its recording will follow.
+The screener calls have recordings: I was the caller. The Telstra and Vodafone calls have recordings; the Optus call has a transcript for now, and its recording will follow. The Apple call is a transcript only: our recording notice never played on it.
 
 ---
 
