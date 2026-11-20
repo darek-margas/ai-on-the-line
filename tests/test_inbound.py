@@ -115,6 +115,7 @@ def test_screener_uses_the_inbound_prompt():
     assert "answering a live phone call" in captured["system"]
     # Asked its name, it says Jenny; the introduction doesn't change.
     assert "Your name is Jenny. When someone asks your name" in captured["system"]
+    assert "It's Jenny, Alex's assistant." in captured["system"] and "don't add that you're an AI" in captured["system"]
     assert "Jenny" not in brief.opening_line
     dialog.agent_name = ""
     asyncio.run(dialog.next_turn(brief, [("callee", "Hello")], {}, "event"))

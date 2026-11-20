@@ -233,8 +233,9 @@ def name_rule(agent_name: str, owner: str) -> str:
     """The agent's own name: given when someone asks for it, never added to the
     introduction. Without one, it answers as the owner's assistant."""
     if agent_name:
-        return (f"- Your name is {agent_name}. When someone asks your name, tell them (\"It's {agent_name}\"). "
-                "Don't add it to your introduction or volunteer it otherwise.")
+        return (f"- Your name is {agent_name}. When someone asks your name, answer with just the name and what you "
+                f"already said you are (\"It's {agent_name}, {owner}'s assistant.\"): don't add that you're an AI "
+                "unless they ask that. Don't put the name in your introduction or volunteer it otherwise.")
     return f"- You have no name of your own. If someone asks it, say you're {owner}'s assistant."
 
 
