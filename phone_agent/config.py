@@ -79,6 +79,8 @@ class Config:
     # screener may say about them. Empty bio = no small talk about the owner.
     owner_pronouns: str = "they"
     owner_bio: str = ""
+    # The agent's own name, given when someone asks for it. Empty: "I'm <owner>'s assistant".
+    agent_name: str = "Jenny"
     # Downloaded recordings: a spoken "Recorded with AI on the Line." at the end,
     # and the voice named in the credit line (empty if you use another voice).
     export_spoken_credit: bool = True
@@ -146,6 +148,7 @@ class Config:
             inbound_max_seconds=int(_env("INBOUND_MAX_SECONDS", "900")),
             owner_pronouns=_env("OWNER_PRONOUNS", "they"),
             owner_bio=_env("OWNER_BIO", ""),
+            agent_name=_env("AGENT_NAME", "Jenny").strip(),
             export_spoken_credit=_env("EXPORT_SPOKEN_CREDIT", "true").lower() == "true",
             credit_voice=_env("CREDIT_VOICE", "Jenny (Dioco)"),
             screener_recording_notice=_env("SCREENER_RECORDING_NOTICE", "true").lower() == "true",

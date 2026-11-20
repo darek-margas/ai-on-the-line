@@ -21,6 +21,7 @@ mkdir -p data && sudo chown 10001 data
 Everything is in `.env`; [.env.example](../.env.example) lists every setting with a comment. The ones that matter first:
 
 - `OWNER_NAME`, `OWNER_PRONOUNS`: who the agent speaks for. It always introduces itself as that person's assistant.
+- `AGENT_NAME`: Jenny by default, after the default voice. The agent gives it only when someone asks its name; the introduction stays "I'm Alex's assistant". Asked whether it's an AI, it still says so. Leave it empty and it answers the name question with "I'm Alex's assistant".
 - `SCREENER_RECORDING_NOTICE`: on by default. The screener's greeting tells callers the call is recorded, which many places require.
 - `OWNER_BIO`: optional. What the call screener may say about you. Leave it empty and it won't make small talk about you.
 - `TIMEZONE` and `CALL_HOURS`: outside numbers are only called within these hours, in this timezone. A single call can override it; extensions are always allowed.

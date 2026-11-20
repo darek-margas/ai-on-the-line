@@ -102,7 +102,7 @@ def test_screener_uses_the_inbound_prompt():
     assert "about Alex: Alex restores old motorbikes." in with_bio.may_share
     assert "her assistant" in with_bio.opening_line and "About Alex: Alex restores old motorbikes." in with_bio.context
     dialog = Dialog.__new__(Dialog)
-    dialog.owner, dialog.provider = "Alex", "ollama"
+    dialog.owner, dialog.provider, dialog.agent_name = "Alex", "ollama", "Jenny"
     captured = {}
 
     async def fake_ask(system, user, schema):
@@ -111,8 +111,14 @@ def test_screener_uses_the_inbound_prompt():
 
     dialog._ask_ollama = fake_ask
     asyncio.run(dialog.next_turn(brief, [("callee", "Hello")], {}, "event"))
-    assert captured["system"] != SYSTEM_PROMPT.format(owner="Alex", must_not="", recording="")
+    assert captured["system"] != SYSTEM_PROMPT.format(owner="Alex", must_not="", recording="", name_rule="")
     assert "answering a live phone call" in captured["system"]
+    # Asked its name, it says Jenny; the introduction doesn't change.
+    assert "Your name is Jenny. When someone asks your name" in captured["system"]
+    assert "Jenny" not in brief.opening_line
+    dialog.agent_name = ""
+    asyncio.run(dialog.next_turn(brief, [("callee", "Hello")], {}, "event"))
+    assert "Jenny" not in captured["system"] and "say you're Alex's assistant" in captured["system"]
     assert "Caller: Hello" in captured["user"]
 
 

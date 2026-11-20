@@ -762,10 +762,11 @@ async def main() -> None:
     db = Database(cfg.data_dir)
     db.fail_unfinished_calls()
     speech = Speech(cfg.stt, cfg.tts, cfg.stt_language, cfg.tts_voice, cfg.audio_rate, cfg.tts_pronounce)
-    dialog = Dialog(cfg.dialog_llm, cfg.owner_name, cfg.ollama_url, cfg.ollama_keep_alive)
+    dialog = Dialog(cfg.dialog_llm, cfg.owner_name, cfg.ollama_url, cfg.ollama_keep_alive, cfg.agent_name)
     inbound_dialog = dialog
     if cfg.inbound_dialog_llm and cfg.inbound_dialog_llm != cfg.dialog_llm:
-        inbound_dialog = Dialog(cfg.inbound_dialog_llm, cfg.owner_name, cfg.ollama_url, cfg.ollama_keep_alive)
+        inbound_dialog = Dialog(cfg.inbound_dialog_llm, cfg.owner_name, cfg.ollama_url, cfg.ollama_keep_alive,
+                                cfg.agent_name)
     log.info("in-call model: %s, incoming calls: %s", cfg.dialog_llm, cfg.inbound_dialog_llm or cfg.dialog_llm)
     ari = Ari(cfg.ari_url, cfg.ari_user, cfg.ari_password)
     manager = CallManager(cfg, db, speech, dialog, ari, inbound_dialog)
