@@ -20,7 +20,8 @@ from .db import Database
 from .dialog import Brief, Dialog
 from .dialing import normalize_number
 from .inbound import PROFILES
-from .session import FILLERS, RECORDING_NOTICE, CallSession, opening_lines, split_sentences
+from .session import (BEAR_WITH_ME, FILLERS, RECORDING_NOTICE, CallSession, opening_lines, split_sentences,
+                      unavailable_line)
 from .speech import Speech
 
 log = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ log = logging.getLogger(__name__)
 FINAL_STATUSES = {"finished", "not_answered", "failed", "cancelled"}
 PENDING_STATUSES = {"awaiting_approval", "scheduled"}  # not dialling yet, hold no slot
 INBOUND_CONNECT_SECONDS = 30  # registered incoming call whose audio never arrives
+WARM_UP_SECONDS = 300  # a cold Ollama load takes minutes; longer than this, it's stuck
 
 
 @dataclass
@@ -57,6 +59,7 @@ class CallState:
     connected: asyncio.Event = field(default_factory=asyncio.Event)
     conversation_over: asyncio.Event = field(default_factory=asyncio.Event)
     done: asyncio.Event = field(default_factory=asyncio.Event)  # final state saved
+    dialog_down: bool = False  # the model failed: apologise and end instead of trying again
 
     def add_transcript(self, who: str, text: str, at: float | None = None) -> None:
         """at: when the line was said (time.time()), if not now."""
@@ -256,7 +259,7 @@ class CallManager:
         call.changed()
         # The greeting plays the moment the audio connects: have it rendered now.
         try:
-            for line in [brief.opening_line] + FILLERS:
+            for line in [brief.opening_line, BEAR_WITH_ME, unavailable_line(self.cfg.owner_name, True)] + FILLERS:
                 for sentence in split_sentences(line):
                     await self.speech.synthesize(sentence)
         except Exception as exc:
@@ -274,10 +277,17 @@ class CallManager:
 
     async def _watch_inbound(self, call: CallState) -> None:
         # Warm up while our greeting plays, so their first answer isn't slow.
-        try:
-            await asyncio.gather(self.inbound_dialog.warm_up(call.brief), self.speech.transcribe(bytes(self.speech.rate)))
-        except Exception:
-            log.warning("call %s: warm-up failed", call.id, exc_info=True)
+        model, whisper = await asyncio.gather(
+            asyncio.wait_for(self.inbound_dialog.warm_up(call.brief), WARM_UP_SECONDS),
+            self.speech.transcribe(bytes(self.speech.rate)), return_exceptions=True)
+        if isinstance(model, BaseException):
+            # Out of credit, Ollama down: the caller hears the greeting, then the
+            # pre-rendered apology as soon as they speak, not dead air.
+            log.warning("call %s: dialog model unavailable: %r", call.id, model)
+            call.dialog_down = True
+            call.error = f"dialog LLM unavailable: {model!r}"
+        if isinstance(whisper, BaseException):
+            log.warning("call %s: Whisper warm-up failed: %r", call.id, whisper)
         try:
             await asyncio.wait_for(call.connected.wait(), INBOUND_CONNECT_SECONDS)
         except TimeoutError:
@@ -325,12 +335,21 @@ class CallManager:
                 # Wake the LLM and Whisper and pre-render both openings before
                 # dialing, so the callee never waits on a cold start.
                 try:
-                    await self.dialog.warm_up(call.brief)
+                    await asyncio.wait_for(self.dialog.warm_up(call.brief), WARM_UP_SECONDS)
+                except Exception as exc:
+                    # Out of credit, Ollama down or stuck: don't ring someone only to
+                    # apologise and hang up.
+                    log.warning("call %s: dialog model unavailable, not dialling: %r", call.id, exc)
+                    call.status = "failed"
+                    call.error = f"dialog LLM unavailable, not dialled: {exc!r}"
+                    return
+                try:
                     await self.speech.transcribe(bytes(self.speech.rate))  # 0.5 s of silence
                 except Exception:
-                    log.warning("call %s: warm-up failed, calling anyway", call.id, exc_info=True)
+                    log.warning("call %s: Whisper warm-up failed, calling anyway", call.id, exc_info=True)
                 notice = [RECORDING_NOTICE] if call.brief.recording_notice else []
-                for line in opening_lines(call.brief.opening_line) + FILLERS + notice:
+                gone = [BEAR_WITH_ME, unavailable_line(call.owner, False)]
+                for line in opening_lines(call.brief.opening_line) + FILLERS + notice + gone:
                     for sentence in split_sentences(line):  # as _say will ask for them
                         await self.speech.synthesize(sentence)
                 if call.outcome == "hung_up_by_owner":

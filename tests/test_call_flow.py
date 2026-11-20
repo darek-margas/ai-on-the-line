@@ -498,9 +498,9 @@ class StreamingDialog(FakeDialog):
 
     async def next_turn(self, brief, transcript, answers, event, notes=None, on_sentence=None):
         self.calls += 1
-        for sentence in ("Thank you, that's all I needed.", "Goodbye."):
+        for sentence in ("Thank you, that's all I needed.", "Bye for now."):
             await on_sentence(sentence)
-        return Turn(say="Thank you, that's all I needed. Goodbye.", answers={"price": "two hundred dollars"},
+        return Turn(say="Thank you, that's all I needed. Bye for now.", answers={"price": "two hundred dollars"},
                     end_call=True, outcome="completed", spoken=True)
 
 
@@ -538,8 +538,8 @@ async def test_streamed_reply_is_spoken_once(tmp_path):
     saved = db.get_call(call.id)
     assert saved["outcome"] == "completed"
     # One transcript line for the whole streamed reply, and each sentence rendered once.
-    assert list(saved["transcript"][-1]) == ["agent", "Thank you, that's all I needed. Goodbye."]
-    assert rendered.count("Goodbye.") == 1 and rendered.count("Thank you, that's all I needed.") == 1
+    assert list(saved["transcript"][-1]) == ["agent", "Thank you, that's all I needed. Bye for now."]
+    assert rendered.count("Bye for now.") == 1 and rendered.count("Thank you, that's all I needed.") == 1
 
 
 def test_hesitations_and_open_questions():

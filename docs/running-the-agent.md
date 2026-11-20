@@ -67,6 +67,8 @@ The model has to be in memory before a call. Loading one from disk takes from se
 
 `check_setup` loads the model too and reports how long that took.
 
+When the model fails, the other side shouldn't hear dead air or an API error. An outgoing call warms the model up before dialling, and doesn't dial if that fails: out of credit, Ollama down, or no answer within 5 minutes. During a call each reply gets 10 seconds to start. After the first miss the agent says "Sorry, bear with me a second." and tries once more, for 8 seconds. If that fails too, it says a goodbye that was rendered before the call ("Sorry, I've hit a technical problem on my end and can't carry on the call right now...") and ends the call as `technical_failure`, with the reason in the call's error. An incoming call is answered either way. If the model failed its warm-up during the greeting, the caller's first words get the goodbye straight away.
+
 Claude, on your side of MCP, only writes the brief and reads the result. The model above does the talking.
 
 ## Ports

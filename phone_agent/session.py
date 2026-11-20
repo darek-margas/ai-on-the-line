@@ -64,6 +64,22 @@ FILLER_AFTER_SECONDS = 1.8
 # Pre-rendered before dialing. Short, so the reply isn't held up behind them; no
 # "Mm-hm.": Piper reads it almost letter by letter ("em-em-hm").
 FILLERS = ["Let me think.", "Let me see.", "Hmm, let me see."]
+# The model can hang (Ollama stuck, Claude overloaded) or fail outright (out of
+# credit). Each attempt at a turn gets this long, so the callee never sits in
+# dead air: after the first, a short "bear with me"; after the second, goodbye.
+TURN_TIMEOUTS = (10.0, 8.0)
+STREAMING_TURN_SECONDS = 30.0  # once words are coming out, the rest may take longer
+BEAR_WITH_ME = "Sorry, bear with me a second."
+
+
+def unavailable_line(owner: str, inbound: bool) -> str:
+    """What the agent says when the model has gone. Pre-rendered with the
+    opening, so it plays without the model."""
+    if inbound:
+        return ("Sorry, I'm having technical trouble and can't take your call properly right now. "
+                "Please try again a bit later. Goodbye.")
+    return ("Sorry, I've hit a technical problem on my end and can't carry on the call right now. "
+            f"{owner} will try again later. Goodbye.")
 END_OF_SPEECH_MS = 700  # pause that ends the callee's turn (550 split real sentences)
 INTRO_EVENT = (
     "You've just said your introduction (the last 'You:' line) and they're quietly listening. "
@@ -858,37 +874,62 @@ class CallSession:
 
     async def _turn(self, event: str) -> Turn | None:
         call = self.call
-        for attempt in range(2):
+        turn = None
+        for attempt, limit in enumerate(() if call.dialog_down else TURN_TIMEOUTS):
             self._streamed_at = 0.0
             try:
                 t0 = time.monotonic()
-                turn = await self.dialog.next_turn(
-                    call.brief, call.transcript, call.answers, event, call.notes,
-                    on_sentence=self._say_streamed,
-                )
+                turn = await self._turn_within(event, limit)
                 if self._streamed_at:
                     log.info("call %s: LLM turn %.0f ms, first words after %.0f ms", call.id,
                              (time.monotonic() - t0) * 1000, (self._streamed_at - t0) * 1000)
                 else:
                     log.info("call %s: LLM turn %.0f ms", call.id, (time.monotonic() - t0) * 1000)
                 break
-            except Exception:
-                log.exception("call %s: dialog turn failed (attempt %d)", call.id, attempt + 1)
+            except Exception as exc:
+                if isinstance(exc, TimeoutError):
+                    log.warning("call %s: no dialog turn within %.0f s (attempt %d)", call.id, limit, attempt + 1)
+                    call.error = f"dialog LLM gave no reply within {limit:.0f} s"
+                else:
+                    log.exception("call %s: dialog turn failed (attempt %d)", call.id, attempt + 1)
+                    call.error = f"dialog LLM failed: {exc!r}"
                 if self._streamed_at:
-                    # Part of the reply is already out: don't start over with a second one.
-                    call.error = "dialog LLM failed mid-reply"
-                    call.set_outcome("technical_failure")
-                    return None
-        else:
-            call.error = "dialog LLM failed twice"
-            await self._say(f"I'm sorry, I'm having technical trouble, so I'll have to go. I'll let {call.owner} know we spoke. Goodbye.")
+                    break  # part of a reply is already out: don't start a second one
+                if attempt == 0:
+                    self._play(await self.speech.synthesize(BEAR_WITH_ME))
+        if turn is None:
+            # Pre-rendered: it plays even with the model gone. No more attempts on this call.
+            call.dialog_down = True
+            call.error = call.error or "dialog LLM unavailable"
+            await self._say(unavailable_line(call.owner, call.brief.direction == "inbound"))
             call.set_outcome("technical_failure")
             return None
+        if call.error and call.error.startswith("dialog LLM"):
+            call.error = None  # the retry worked
         call.answers.update(turn.answers)
         if turn.notes and turn.notes not in call.notes:
             call.notes.append(turn.notes)
         call.changed()
         return turn
+
+    async def _turn_within(self, event: str, limit: float) -> Turn:
+        """One model turn, or TimeoutError if no words came within limit seconds.
+        A reply that has started streaming gets STREAMING_TURN_SECONDS to finish."""
+        call = self.call
+        task = asyncio.ensure_future(self.dialog.next_turn(
+            call.brief, call.transcript, call.answers, event, call.notes,
+            on_sentence=self._say_streamed,
+        ))
+        try:
+            done, _ = await asyncio.wait({task}, timeout=limit)
+            if not done and self._streamed_at:
+                done, _ = await asyncio.wait({task}, timeout=STREAMING_TURN_SECONDS)
+            if not done:
+                raise TimeoutError
+            return task.result()
+        finally:
+            if not task.done():
+                task.cancel()
 
     async def _follow_intro(self) -> bool:
         """Prepare the first question while the introduction plays, and ask it if
@@ -911,15 +952,20 @@ class CallSession:
             self.utterances.put_nowait(item)  # they spoke (or hung up): the main loop handles it
             return False
         try:
-            turn = await pending
-        except Exception:
-            log.exception("call %s: preparing the first question failed", call.id)
-            return False
-        call.answers.update(turn.answers)
-        if turn.notes and turn.notes not in call.notes:
-            call.notes.append(turn.notes)
-        call.changed()
-        if turn.say:
+            turn = await asyncio.wait_for(pending, TURN_TIMEOUTS[0])
+        except Exception as exc:
+            # Failed or stuck: ask again the usual way, which retries once and
+            # otherwise apologises, rather than leave them in silence.
+            log.warning("call %s: preparing the first question failed: %r", call.id, exc)
+            turn = await self._turn(INTRO_EVENT)
+            if turn is None:
+                return True
+        else:
+            call.answers.update(turn.answers)
+            if turn.notes and turn.notes not in call.notes:
+                call.notes.append(turn.notes)
+            call.changed()
+        if turn.say and not turn.spoken:
             await self._say(turn.say)
         if turn.end_call:
             call.set_outcome(turn.outcome if turn.outcome != "in_progress" else "completed")
