@@ -20,7 +20,7 @@ from starlette.responses import FileResponse, HTMLResponse, RedirectResponse, Re
 
 from .ari import Ari
 from .auth import TokenAuth
-from .calls import CallManager
+from .calls import FINAL_STATUSES, CallManager
 from .config import Config
 from .credit import SPOKEN_CREDIT, credit_line, with_credit
 from .db import Database
@@ -472,6 +472,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             f"<table class='answers'>{answers or '<tr><td class=muted>none yet</td></tr>'}</table>"
             f"{'<h2>Notes</h2><ul>' + notes + '</ul>' if notes else ''}"
             f"<h2>Transcript</h2><div class='transcript'>{lines or '<p class=muted>none yet</p>'}</div>"
+            f"{delete_form(cid) if call['status'] in FINAL_STATUSES and can_delete(request, cfg) else ''}"
         )
         live = call["status"] in LIVE  # not while it waits: the page would reload under your finger
         return HTMLResponse(page(call["callee"] or "Call", body, refresh=live))
@@ -548,6 +549,17 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             log.info("call %s rejected by the owner", call_id)
         return RedirectResponse(f"/calls/{call_id}", status_code=303)
 
+    @mcp.custom_route("/calls/{call_id}/delete", methods=["POST"])
+    async def delete_call(request: Request) -> Response:
+        if not can_delete(request, cfg):
+            return HTMLResponse(page("Not allowed", "<p>Deleting needs the approval token.</p>"), status_code=403)
+        call_id = request.path_params["call_id"]
+        if not manager.delete(call_id):
+            return HTMLResponse(page("Not deleted", "<p>Only a call that has ended can be deleted.</p>"),
+                                status_code=409)
+        log.info("call %s deleted by the owner", call_id)
+        return RedirectResponse("/", status_code=303)
+
     @mcp.custom_route("/recordings/{call_id}.wav", methods=["GET"])
     async def recording(request: Request) -> Response:
         call = manager.get(request.path_params["call_id"])
@@ -617,6 +629,20 @@ WAITING = {"awaiting_approval", "scheduled"}
 def approver(request: Request) -> bool:
     """Signed in with APPROVAL_TOKEN (see auth.py)."""
     return bool(request.scope.get("state", {}).get("approver"))
+
+
+def can_delete(request: Request, cfg) -> bool:
+    """With APPROVAL_TOKEN set, only the owner deletes calls: API_TOKEN is
+    Claude's, and callers' words reach Claude."""
+    return approver(request) or not cfg.approval_token
+
+
+def delete_form(cid: str) -> str:
+    return (
+        f"<form class='delete' method='post' action='/calls/{cid}/delete' onsubmit=\"return confirm("
+        "'Delete this call? Its transcript, answers and notes are removed for good. "
+        "The PBX keeps its own recording.')\"><button class='secondary'>Delete call</button></form>"
+    )
 GOOD = {"completed"}
 BAD = {"failed", "technical_failure"}
 
@@ -721,6 +747,7 @@ table.answers th {{ width: 30%; text-transform: capitalize; color: var(--text); 
 label.check {{ font-weight: normal; display: flex; gap: 8px; align-items: center; }}
 label.check input {{ width: auto; margin: 0; }}
 form.inline {{ margin: 0; }}
+form.delete {{ margin-top: 32px; }}
 button.secondary {{ background: transparent; color: var(--bad); border: 1px solid var(--bad); }}
 .badge.live {{ color: var(--live); animation: pulse 1.5s infinite; }}
 @keyframes pulse {{ 50% {{ opacity: .45; }} }}

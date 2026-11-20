@@ -130,7 +130,7 @@ Approving can remember the number (`new_numbers`, the default once the token is 
 Port 8090 also serves a few pages for people. The first visit asks for the API token and sets a cookie, so the call links in Claude's reports open straight away after that.
 
 - **`/`**, the call list: every call, newest first, with direction, who, length and result. It refreshes itself.
-- **`/calls/<id>`**, one call: the goal, the answers or message, notes and the full transcript. While a call is live, the page refreshes and the transcript grows. A call waiting for approval shows its brief and, when you're signed in with the approval token, Approve and Reject.
+- **`/calls/<id>`**, one call: the goal, the answers or message, notes and the full transcript. While a call is live, the page refreshes and the transcript grows. A call waiting for approval shows its brief and, when you're signed in with the approval token, Approve and Reject. A call that has ended has a Delete call button at the bottom, which asks first and removes the call from the list for good: transcript, answers and notes. The PBX's own recording isn't touched. With `APPROVAL_TOKEN` set, only that token sees the button.
 - **`/test`**, a form for trying the agent without Claude: a number or extension, an opening line and one question per line. Extensions can be called any time; outside numbers only within calling hours. Signed in with the approval token, calls from the form count as approved.
 
 With the PBX recordings mounted (`RECORDINGS_DIR`), a call page has a player and one Download line under it:

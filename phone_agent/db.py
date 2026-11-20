@@ -84,6 +84,11 @@ class Database:
         self.conn.commit()
         return bool(removed)
 
+    def delete_call(self, call_id: str) -> bool:
+        removed = self.conn.execute("DELETE FROM calls WHERE id = ?", (call_id,)).rowcount
+        self.conn.commit()
+        return bool(removed)
+
     def save_call(self, call: dict[str, Any]) -> None:
         row = {k: json.dumps(v) if k in JSON_COLUMNS else v for k, v in call.items()}
         cols = ", ".join(row)

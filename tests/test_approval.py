@@ -206,3 +206,33 @@ def test_approved_numbers_page(tmp_path):
     assert client.post("/approved", headers=as_owner, data={"remove": "0255500000"}).status_code == 303
     assert not manager.db.number_approved("0255500000")
     assert "000" in client.post("/approved", headers=as_owner, data={"add": "000"}).text  # refused, with the reason
+
+
+def test_deleting_an_ended_call(tmp_path):
+    """Only the owner deletes, only a call that has ended, after a confirm()."""
+    from starlette.testclient import TestClient
+
+    from phone_agent.server import build_app
+
+    manager, _ = manager_for(tmp_path, call_approval="new_numbers", approval_token="approve-me", api_token="api")
+    async def place():
+        return manager.start_call("0255500000", BRIEF)
+
+    loop = asyncio.new_event_loop()
+    call = loop.run_until_complete(place())
+    mcp = build_app(manager.cfg, manager, manager.db, None, None, None)
+    client = TestClient(TokenAuth(mcp.streamable_http_app(), "api", "approve-me"), follow_redirects=False)
+    as_claude = {"Authorization": "Bearer api"}
+    as_owner = {"Authorization": "Bearer approve-me"}
+
+    assert "Delete call" not in client.get(f"/calls/{call.id}", headers=as_owner).text  # still waiting
+    assert client.post(f"/calls/{call.id}/delete", headers=as_owner).status_code == 409
+    manager.reject(call.id)
+    assert "Delete call" not in client.get(f"/calls/{call.id}", headers=as_claude).text
+    assert client.post(f"/calls/{call.id}/delete", headers=as_claude).status_code == 403
+    page = client.get(f"/calls/{call.id}", headers=as_owner).text
+    assert "Delete call" in page and "confirm(" in page
+    assert client.post(f"/calls/{call.id}/delete", headers=as_owner).status_code == 303
+    assert manager.get(call.id) is None
+    assert client.get(f"/calls/{call.id}", headers=as_owner).status_code == 404
+    loop.close()

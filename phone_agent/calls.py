@@ -311,6 +311,16 @@ class CallManager:
         except TimeoutError:
             pass
 
+    def delete(self, call_id: str) -> bool:
+        """Forget a call that has ended: its row, transcript and answers. A call
+        still waiting, queued or on the line can't be deleted; hang it up or
+        reject it first. The PBX keeps its own recording."""
+        call = self.calls.get(call_id)
+        if call is not None and call.status not in FINAL_STATUSES:
+            return False
+        self.calls.pop(call_id, None)
+        return self.db.delete_call(call_id) or call is not None
+
     async def hang_up(self, call_id: str) -> bool:
         call = self.calls.get(call_id)
         if call is None or call.status in FINAL_STATUSES:
