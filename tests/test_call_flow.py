@@ -291,6 +291,39 @@ def test_answered_after_menu():
         assert not answered_after_menu(menu_talk), menu_talk
 
 
+def test_voice_bot_question_is_not_a_hold_recording():
+    """Medicare: after "Welcome to the Services Australia Medicare Program." the
+    bot asks for a few words. That wants an answer, not silence."""
+    from phone_agent.session import sounds_recorded
+
+    for prompt in ("So tell me in a few words, what's the reason for your call?",
+                   "In just a few words, like I need a replacement card, or it's about a claim, "
+                   "please tell me what is the reason for your call."):
+        assert not sounds_recorded(prompt), prompt
+    assert sounds_recorded("We do not tolerate misuse of Services Australia systems and services to "
+                           "deliberately cause harm or have power and control over other people.")
+
+
+def test_only_the_first_words_after_a_key_press_can_be_a_person():
+    """Medicare's recorded card message ran on after we pressed 2; its sixth line
+    is short, but it's still the recording, not someone picking up."""
+    from types import SimpleNamespace
+
+    from phone_agent.session import CallSession, answered_after_menu
+
+    session = CallSession.__new__(CallSession)
+    session.call = SimpleNamespace(transcript=[
+        ("callee", "For card inquiries, press 2."), ("agent", "[pressed 2]"),
+        ("callee", "If you've lost, damaged or need a new Medicare card, you can request us online."),
+        ("callee", "We'll send your new card to the address you've given us."),
+        ("callee", "It'll arrive in about three to four weeks."),
+    ])
+    assert answered_after_menu("It'll arrive in about three to four weeks.")  # short enough on its own
+    assert not session._first_since_press(1)
+    session.call.transcript = [("agent", "[pressed 2]"), ("callee", "Whitegoods, Sam speaking.")]
+    assert session._first_since_press(1)
+
+
 def test_pronunciation_spellings():
     from phone_agent.speech import Speech
 

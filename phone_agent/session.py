@@ -223,7 +223,13 @@ HOLD_PHRASE = re.compile(
 # never when it's a menu: a menu repeats because it wants an answer.
 REPEAT_MIN_WORDS = 8
 REPEAT_MATCH = 0.7
-MENU_WORDS = re.compile(r"\bpress\b|\boption\b|\bsay\b|\bdial\b|\benter\b|\bkey\b", re.I)
+# Menus and voice bots that want an answer: a key, or a few spoken words
+# ("So tell me in a few words, what's the reason for your call?").
+MENU_WORDS = re.compile(
+    r"\bpress\b|\boption\b|\bsay\b|\bdial\b|\benter\b|\bkey\b|\btell (me|us)\b|"
+    r"\bin (just )?a few words\b|\breason for (your|the) call\b",
+    re.I,
+)
 
 
 def _words(text: str) -> list[str]:
@@ -700,7 +706,7 @@ class CallSession:
                     continue
                 self._heard_since_we_spoke.extend(said)
                 after_hold = self._on_hold and not self._introduced()
-                if ((self._just_pressed() or after_hold) and answered_after_menu(joined)) or (
+                if ((self._first_since_press(len(said)) or after_hold) and answered_after_menu(joined)) or (
                         after_hold and person_after_hold(joined)):
                     # "Harvey Norman Moore Park" right after our key press, even garbled
                     # ("Have you no more, Pak?"), or "Hi, we're with Riverside" after
@@ -1013,11 +1019,16 @@ class CallSession:
         opening = self.call.brief.opening_line
         return any(who == "agent" and text.endswith(opening) for who, text in self.call.transcript)
 
-    def _just_pressed(self) -> bool:
-        """Our last action was a key press and we haven't spoken since."""
+    def _first_since_press(self, heard: int) -> bool:
+        """What we just heard (the last `heard` callee lines) is the first thing
+        since our key press. Only that can be a person picking up: a recording
+        that has been talking since the press isn't one, however short its next
+        line ("It'll arrive in about three to four weeks.")."""
+        callee = 0
         for who, text in reversed(self.call.transcript):
             if who == "agent":
-                return text.startswith("[pressed")
+                return text.startswith("[pressed") and callee <= heard
+            callee += 1
         return False
 
     def _we_spoke_last(self) -> bool:
