@@ -68,9 +68,6 @@ FILLERS = ["Let me think.", "Let me see.", "Hmm, let me see."]
 # credit). Each attempt at a turn gets this long, so the callee never sits in
 # dead air: after the first, a short "bear with me"; after the second, goodbye.
 TURN_TIMEOUTS = (10.0, 8.0)
-# In a queue, a short line this long after the previous one came out of music or
-# silence, so it may be a person picking up; sooner, it's the same recording.
-HOLD_GAP_SECONDS = 6.0
 STREAMING_TURN_SECONDS = 30.0  # once words are coming out, the rest may take longer
 BEAR_WITH_ME = "Sorry, bear with me a second."
 
@@ -709,7 +706,13 @@ class CallSession:
                     continue
                 self._heard_since_we_spoke.extend(said)
                 after_hold = self._on_hold and not self._introduced()
-                if ((self._first_since_press(len(said)) or (after_hold and (self._after_hold_sounds(len(said)) or PERSON_CUE.search(joined))))
+                # In a queue only a universal cue ("Hello?", "are you there?", "Sam
+                # speaking") or a short line straight out of hold tones skips the model.
+                # Anything else, even a short line after another recorded one ("Staff
+                # safety is our priority."), is the model's call: if it stays silent on
+                # a person, they say hello again.
+                if ((self._first_since_press(len(said))
+                     or (after_hold and (self._after_tones(len(said)) or PERSON_CUE.search(joined))))
                         and answered_after_menu(joined)) or (
                         after_hold and person_after_hold(joined)):
                     # "Harvey Norman Moore Park" right after our key press, even garbled
@@ -1035,21 +1038,12 @@ class CallSession:
             callee += 1
         return False
 
-    def _after_hold_sounds(self, heard: int) -> bool:
-        """In a queue, what we just heard (the last `heard` callee lines) follows
-        hold music, tones or a pause, not another recorded sentence. A person
-        picks up out of the music ("Beep. Beep." then "Hi, we're with
-        Riverside"); "Staff safety is our priority." straight after "We will
-        remain calm, courteous and respectful" is the same recording."""
-        lines, times = self.call.transcript, self.call.timings
+    def _after_tones(self, heard: int) -> bool:
+        """What we just heard (the last `heard` callee lines) came straight after
+        hold tones or music ("Beep. Beep." then "Hi, we're with Riverside")."""
+        lines = self.call.transcript
         i = len(lines) - heard - 1
-        if i < 0 or lines[i][0] != "callee":
-            return True  # nothing from them since we last spoke or pressed
-        if hold_noise(lines[i][1]):
-            return True
-        if len(times) != len(lines) or times[i] is None or times[-heard] is None:
-            return False
-        return times[-heard] - times[i] >= HOLD_GAP_SECONDS
+        return i >= 0 and lines[i][0] == "callee" and hold_noise(lines[i][1])
 
     def _we_spoke_last(self) -> bool:
         return bool(self.call.transcript) and self.call.transcript[-1][0] == "agent"

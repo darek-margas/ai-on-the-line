@@ -324,27 +324,26 @@ def test_only_the_first_words_after_a_key_press_can_be_a_person():
     assert session._first_since_press(1)
 
 
-def test_a_short_line_straight_after_a_queue_recording_is_not_a_person():
-    """Medicare's queue: "Staff safety is our priority." three seconds after the
-    previous recorded line. A line after hold tones or a long pause still may be."""
+def test_in_a_queue_only_person_cues_skip_the_model():
+    """Medicare's queue: "Staff safety is our priority." after another recorded
+    line has no cue, so the model decides. "Hello?" or "Sam speaking" introduce
+    us at once, and so does a short line straight out of hold tones."""
     from types import SimpleNamespace
 
-    from phone_agent.session import CallSession
+    from phone_agent.session import PERSON_CUE, CallSession
 
+    assert not PERSON_CUE.search("Staff safety is our priority.")
+    for line in ("Hello?", "Sam speaking.", "Are you there?"):
+        assert PERSON_CUE.search(line), line
     session = CallSession.__new__(CallSession)
-    session.call = SimpleNamespace(
-        transcript=[("agent", "Operator"),
-                    ("callee", "We will remain calm, courteous and respectful and ask the same of you."),
-                    ("callee", "Staff safety is our priority.")],
-        timings=[60.0, 75.0, 78.0])
-    assert not session._after_hold_sounds(1)
-    session.call.timings = [60.0, 75.0, 95.0]  # twenty seconds of music in between
-    assert session._after_hold_sounds(1)
-    session.call = SimpleNamespace(
-        transcript=[("agent", "I'm calling about a lost wallet."), ("callee", "Beep.  Beep."),
-                    ("callee", "Hi, we're with Riverside.")],
-        timings=[5.0, 30.0, 31.0])
-    assert session._after_hold_sounds(1)
+    session.call = SimpleNamespace(transcript=[
+        ("agent", "Operator"),
+        ("callee", "We will remain calm, courteous and respectful and ask the same of you."),
+        ("callee", "Staff safety is our priority.")])
+    assert not session._after_tones(1)
+    session.call.transcript = [("agent", "I'm calling about a lost wallet."), ("callee", "Beep.  Beep."),
+                               ("callee", "Hi, we're with Riverside.")]
+    assert session._after_tones(1)
 
 
 def test_pronunciation_spellings():
