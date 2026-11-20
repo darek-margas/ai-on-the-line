@@ -4,6 +4,12 @@ Give it a goal and it phones the place, gets past the menu and the hold music, t
 
 It's for people who already run their own phone system, or are happy to: Asterisk or FreePBX with a SIP trunk, a Docker host, and Whisper and Piper for speech, the kind of setup a Home Assistant enthusiast often has half of already. It isn't an app you install on a phone. If none of that is familiar, expect a weekend of setup before the first call; [Running it yourself](#running-it-yourself) lists the pieces.
 
+If you only read three calls, read these:
+
+- [Paddle steamers in December](docs/stories/paddle-steamers.md): 88 seconds with the operator, and an answer their website didn't have. One boat had been sold, another was in survey.
+- The same iPhone deal from [Optus](docs/stories/optus-iphone.md), [Telstra](docs/stories/telstra-iphone.md) and [Vodafone](docs/stories/vodafone-iphone.md): voice bots, a nine-minute queue, salespeople who wanted the customer instead, and three prices that line up side by side. The Telstra and Vodafone calls have recordings.
+- ["You are talking in a loop and that's endless"](docs/stories/three-pitches.md#youve-won-a-holiday): a caller selling a free Gold Coast holiday gives up on the call screener before it runs out of questions. Recording included; I was the caller.
+
 ## What it's for
 
 I wanted to type "ring the motels in the town we're driving to and ask about a family room for the 12th" and get answers back, not a list of phone numbers to work through myself.
