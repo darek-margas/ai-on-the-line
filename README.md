@@ -64,7 +64,7 @@ Phone menus get real keypad presses through Asterisk, because the first big reta
 
 Hold music and hold beeps get silence. An early version said "let me think" into the hold queue every few seconds; nobody heard it, but the recordings were embarrassing.
 
-When a person answers ("Flower Power, Jordan speaking"), the opening line plays straight away from a pre-rendered file instead of waiting for the model.
+When a person answers ("Flower Power, Jordan speaking"), the opening line plays straight away from a pre-rendered file instead of waiting for the model. In a hold queue that shortcut needs a clear cue ("speaking", "hello?", "are you there?") or a short line straight after the hold tones. Anything else goes to the model, which stays quiet unless it's said to us: Medicare's queue plays "Staff safety is our priority" between other recordings, and the agent used to introduce itself to it. A person who wants us says hello again.
 
 People pause mid-sentence, say "ah", walk off to check something, or carry on a second after they seemed done. The agent waits longer when a sentence trails off, treats a bare "um" as the start of something, never starts a reply while someone is mid-sentence, and if they carry on before its reply has started, it drops that reply and answers everything together. Replies stream, so the first words usually come 1.2 to 1.8 seconds after the other person stops.
 
@@ -193,7 +193,7 @@ If you publish recordings made with it, a "Made with AI on the Line" line with a
 
 It has been making real calls from my home PBX for a few weeks: shops, a paddle steamer operator, a motel about a refund, three phone carriers' sales lines, and a lot of calls into its own screener. It's tested on one PBX (FreePBX 17), one trunk (Internode) and mostly one voice. Other setups will find things I haven't.
 
-The Telstra and Vodafone calls have recordings; the Optus call has a transcript in its story for now, and its recording will follow. The Apple call stays a transcript: our recording notice never played on it, and I only publish recordings of calls where the other side heard that we record. The screener recordings are me playing the caller.
+The Telstra and Vodafone calls have recordings; the Optus call has a transcript in its story for now, and its recording will follow. The Apple call is a transcript for now; its recording is archived. I only publish a recording when the other side announced that the call is or may be recorded. The screener recordings are me playing the caller.
 
 What helps most is [test samples](docs/test-samples.md) of calls where the timing goes wrong, and reports from other PBXes and trunks. Asterisk is the only telephony backend so far. A backend that registers straight to a SIP account is the obvious next piece.
 

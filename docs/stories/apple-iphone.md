@@ -2,7 +2,7 @@
 
 The fourth call about the same phone. [Optus](optus-iphone.md), [Telstra](telstra-iphone.md) and [Vodafone](vodafone-iphone.md) all charge Apple's price for the iPhone 18 Pro Max and spread it over 36 months, with no subsidy. So the obvious next question was whether Apple itself sells it on a plan, subsidised or locked to a carrier, and what it costs straight from Apple with my current phone traded in.
 
-There's no recording on this page. Apple's voice bot announced that calls are recorded, but the agent's own recording notice never played, for a reason that's below. I only publish recordings of calls where the other side heard that we record, so this one stays a transcript.
+There's no recording on this page for now. Apple's voice bot announced that calls are recorded, which is all I need to publish one, but I've kept this one in my archive. The agent's own recording notice never played, for a reason that's below.
 
 ## Setup
 
