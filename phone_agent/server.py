@@ -30,7 +30,7 @@ from .sample import call_sample
 from .speech import Speech
 
 log = logging.getLogger(__name__)
-MAX_CALL_MINUTES = 60  # longest time limit place_call may ask for
+MAX_CALL_MINUTES = 120  # longest time limit place_call may ask for
 
 # Required by the additional term in NOTICE (AGPL section 7(b)): keep this credit
 # in the footer. If you run a modified version for others, set SOURCE_URL to
@@ -160,7 +160,7 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             callee_timezone: IANA zone if the callee isn't in the default zone, for the calling-hours check.
             ignore_calling_hours: Only for test calls to the owner's own phone.
             run_at: Place the call later: local time in the callee's timezone, "2026-11-20 09:30". Up to 30 days ahead.
-            max_minutes: Time limit for this call, if it needs longer than the server's default (MAX_CALL_SECONDS); up to 60. Time on hold isn't counted.
+            max_minutes: Time limit for this call, if it needs longer than the server's default (MAX_CALL_SECONDS); up to 120. Time on hold isn't counted, and the call may also wait this long in a queue (instead of MAX_HOLD_SECONDS).
             recording_notice: When their recorded announcement says the call is recorded, say ours is too (only to the recording, never to a person). Default: the server's RECORDING_NOTICE.
         """
         return start_call(

@@ -969,6 +969,48 @@ async def test_looping_hold_message_skips_the_model(tmp_path):
     assert saved["outcome"] == "completed"
 
 
+@pytest.mark.asyncio
+async def test_a_queue_line_the_model_ignores_keeps_us_on_hold(tmp_path):
+    """Medicare, 23 Nov: "Staff safety is our priority." went to the model,
+    which stayed silent, but the call stopped counting as on hold, so the
+    queue used up its time limit. Still on hold, the person's "Hello?" gets
+    the opening at once."""
+    cfg = make_config(tmp_path)
+    db = Database(cfg.data_dir)
+    loop = "Thank you for calling. All our consultants are currently busy. Your call is important to us."
+    speech = ScriptedSpeech([
+        loop,
+        "Staff safety is our priority.",
+        "Hello?",
+        "Yes, that plan includes international calls.",
+    ])
+    dialog = ScriptedDialog([
+        Turn(say=""),
+        Turn(say="Great, thanks. Bye!", answers={"international": "yes"}, end_call=True, outcome="completed"),
+    ])
+    manager = CallManager(cfg, db, speech, dialog, None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+    ari = BurstAri(server.sockets[0].getsockname()[1], [250, 60, 25, 25])
+    manager.ari = ari
+
+    import phone_agent.vad as vad
+    orig = vad.webrtcvad.Vad.is_speech
+    vad.webrtcvad.Vad.is_speech = lambda self, frame, rate: max(frame) > 8
+    try:
+        brief = Brief(goal="Plan question", callee="Telco", opening_line="Hi, I'm Alex's assistant, with a question about a plan.",
+                      questions={"international": "does the plan include international calls"})
+        call = manager.start_call("0255500000", brief)
+        await asyncio.wait_for(call.done.wait(), 60)
+    finally:
+        vad.webrtcvad.Vad.is_speech = orig
+        server.close()
+
+    saved = db.get_call(call.id)
+    agent = [text for who, text in saved["transcript"] if who == "agent"]
+    assert agent == [brief.opening_line, "Great, thanks. Bye!"], saved["transcript"]
+    assert dialog.calls == 2  # the safety line, then the answer; "Hello?" skipped the model
+
+
 def test_queue_promotions_and_music():
     from phone_agent.session import is_hold_sound, is_promo
     for text in [

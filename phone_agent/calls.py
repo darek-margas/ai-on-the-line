@@ -454,7 +454,8 @@ class CallManager:
             max_call_seconds=(self.cfg.inbound_max_seconds if inbound
                               else call.schedule.get("max_seconds") or self.cfg.max_call_seconds),
             hold_timeout_seconds=self.cfg.hold_timeout_seconds,
-            max_hold_seconds=self.cfg.max_hold_seconds,
+            # A call given a longer limit may also wait that long in a queue.
+            max_hold_seconds=max(self.cfg.max_hold_seconds, call.schedule.get("max_seconds") or 0),
             barge_in=self.cfg.barge_in,
             send_dtmf=send_dtmf,
         )

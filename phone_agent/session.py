@@ -544,6 +544,7 @@ class CallSession:
                 return
 
             they_spoke = False  # a filler only fits right after they've said something
+            queue_line = False  # a line in the queue the model judges; still on hold unless it answers
             if pending_event:
                 event, pending_event = pending_event, None
                 item, forced = None, True
@@ -726,7 +727,12 @@ class CallSession:
                 if HOLD_PHRASE.search(joined):
                     self._on_hold = True  # "Transferring you now": the dialog may thank them, no filler
                 elif not RECORDING_HINT.search(joined):
-                    self._on_hold = False
+                    if after_hold:
+                        # The model decides whether it's a person. Until it answers, we're
+                        # still queuing, and that time mustn't count against the call.
+                        queue_line = True
+                    else:
+                        self._on_hold = False
                 if all(BARE_HELLO.match(h) for h in said) and time.monotonic() - self._last_said_at < STALE_HELLO_SECONDS:
                     # "Hello?" said over our line: it answers them, unless they didn't
                     # catch it and stay quiet afterwards; then ask again, briefly.
@@ -793,6 +799,8 @@ class CallSession:
                 # A person picked up (maybe mid hold message) and the dialog chose silence.
                 log.info("call %s: person on the line but no reply chosen; introducing", call.id)
                 turn.say = call.brief.opening_line
+            if queue_line and (turn.say or turn.dtmf):
+                self._on_hold = False  # the model took it for a person
             if turn.dtmf and not self._menu_playing():
                 # Pressing keys at a person (who just said "hello") ends the call.
                 log.info("call %s: ignoring dtmf %r, no menu in progress", call.id, turn.dtmf)
