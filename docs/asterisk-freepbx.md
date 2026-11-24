@@ -168,7 +168,7 @@ exten => s,1,Set(AGENT_UUID=${FILTER(0-9a-f-,${SHELL(cat /proc/sys/kernel/random
  same => n,Hangup()
 ```
 
-Registration takes about a second. The agent uses that time to warm up the model and speech recognition, and the greeting is pre-rendered, so the caller hears "Hi, you've reached Darek's phone, I'm his assistant" half a second after the call connects.
+Registration takes about a second. The agent uses that time to warm up the model and speech recognition, and the greeting is pre-rendered, so the caller hears "Hi, you've reached Darek's assistant" half a second after the call connects.
 
 To try it, add a test extension under `[from-internal-custom]` and ring it from a handset:
 

@@ -93,14 +93,16 @@ async def test_inbound_refuses_bad_requests(tmp_path):
 def test_screener_uses_the_inbound_prompt():
     brief = screener_brief("Alex", "")
     assert brief.direction == "inbound" and "withheld" in brief.callee
-    # No bio, no pronouns set: nothing personal to share, and "their assistant".
+    # No bio, no pronouns set: nothing personal to share, and "They can't come".
     assert not any(s.startswith("about Alex") for s in brief.may_share)
-    assert "their assistant" in brief.opening_line and "About Alex" not in brief.context
-    assert "this call is recorded" in brief.opening_line and brief.opening_line.endswith("What's it about?")
+    assert "They can't come" in brief.opening_line and "About Alex" not in brief.context
+    assert brief.opening_line.startswith("Hi, you've reached Alex's assistant.")
+    assert "this call is recorded" in brief.opening_line and brief.opening_line.endswith("What can I do for you?")
+    assert "message" not in brief.opening_line  # it starts a conversation, not a voicemail
     assert "recorded" not in screener_brief("Alex", "", recording_notice=False).opening_line
     with_bio = screener_brief("Alex", "", bio="Alex restores old motorbikes.", pronouns="She")
     assert "about Alex: Alex restores old motorbikes." in with_bio.may_share
-    assert "her assistant" in with_bio.opening_line and "About Alex: Alex restores old motorbikes." in with_bio.context
+    assert "She can't come" in with_bio.opening_line and "About Alex: Alex restores old motorbikes." in with_bio.context
     dialog = Dialog.__new__(Dialog)
     dialog.owner, dialog.provider, dialog.agent_name = "Alex", "ollama", "Jenny"
     captured = {}
