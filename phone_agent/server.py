@@ -508,7 +508,8 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
                 "<button class='secondary'>Remove</button></form></td>"
                 if owner else ""
             )
-            rows += (f"<tr><td class='num'>{esc(n['number'])}</td><td class='nowrap'>{when(n['added'])}</td>"
+            rows += (f"<tr><td class='num'>{esc(n['number'])}</td><td>{esc(n['callee'] or '')}</td>"
+                     f"<td class='nowrap'>{when(n['added'])}</td>"
                      f"<td>{origin}</td>{remove}</tr>")
         fixed = ", ".join(esc(n) for n in cfg.approved_numbers)
         mode = {
@@ -520,9 +521,9 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             "<h1>Approved numbers</h1>"
             f"<p>{mode} Extensions never wait.</p>"
             + (f"<p class='error'>{esc(error)}</p>" if error else "")
-            + "<div class='scroll'><table><tr><th>Number</th><th>Approved</th><th>With</th>"
+            + "<div class='scroll'><table><tr><th>Number</th><th>Who</th><th>Approved</th><th>With</th>"
             + ("<th></th>" if owner else "") + "</tr>"
-            + (rows or f"<tr><td colspan=4 class=muted>None yet.</td></tr>") + "</table></div>"
+            + (rows or f"<tr><td colspan=5 class=muted>None yet.</td></tr>") + "</table></div>"
             + (f"<p class='muted'>Also approved in .env (APPROVED_NUMBERS): {fixed}</p>" if fixed else "")
             + ("<form method='post'><label>Approve a number<input name='add' placeholder='+61 2 5550 1234' required>"
                "</label><button>Add</button></form>" if owner else

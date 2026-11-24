@@ -191,6 +191,9 @@ def test_approved_numbers_page(tmp_path):
 
     manager, _ = manager_for(tmp_path, call_approval="new_numbers", approval_token="approve-me", api_token="api")
     manager.db.approve_number("0255500000", "")
+    manager.db.save_call({"id": "c1", "created": 0, "phone": "0255502222", "callee": "Riverside Motel", "brief": {},
+                          "status": "finished"})
+    manager.db.approve_number("0255502222", "c1")
     mcp = build_app(manager.cfg, manager, manager.db, None, None, None)
     client = TestClient(TokenAuth(mcp.streamable_http_app(), "api", "approve-me"), follow_redirects=False)
     as_claude = {"Authorization": "Bearer api"}
@@ -198,6 +201,7 @@ def test_approved_numbers_page(tmp_path):
 
     page = client.get("/approved", headers=as_claude)
     assert "0255500000" in page.text and "Remove" not in page.text
+    assert "Riverside Motel" in page.text  # who it is, from the call it was approved with
     assert client.post("/approved", headers=as_claude, data={"remove": "0255500000"}).status_code == 403
     assert client.post("/approved", headers=as_claude, data={"add": "0255501111"}).status_code == 403
 

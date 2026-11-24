@@ -76,7 +76,11 @@ class Database:
         self.conn.commit()
 
     def approved_numbers(self) -> list[dict[str, Any]]:
-        rows = self.conn.execute("SELECT * FROM approved_numbers ORDER BY added DESC").fetchall()
+        # Who the number belongs to comes from the call it was approved with, if any.
+        rows = self.conn.execute(
+            "SELECT a.*, c.callee FROM approved_numbers a LEFT JOIN calls c ON c.id = a.call_id "
+            "ORDER BY a.added DESC"
+        ).fetchall()
         return [dict(r) for r in rows]
 
     def remove_number(self, number: str) -> bool:
