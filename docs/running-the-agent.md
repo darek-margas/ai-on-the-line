@@ -141,6 +141,14 @@ With the PBX recordings mounted (`RECORDINGS_DIR`), a call page has a player and
 
 Without the recordings there's no player, and the only download is a test sample with the transcript and timings. [test-samples.md](test-samples.md) explains samples and how to contribute one.
 
+## Email reports
+
+A screened call is easy to miss until you open the call list. With `SMTP_HOST` and `EMAIL_TO` set in `.env`, the agent emails a report when a call ends. The subject says who called and why ("Call from Sam (Riverside Nursery): returning a call about trees"). The body has the call page link, answers, notes and the full transcript.
+
+With `RECORDINGS_DIR` set, the recording is attached as a WAV once the PBX has finished it, which can take a minute after the call ends. It's about 1 MB a minute, and recordings over `EMAIL_MAX_MB` (default 15) get a note to play them on the call page instead.
+
+`EMAIL_CALLS=inbound` (the default) covers calls the agent answered. `all` adds outbound call reports. Mail goes out as plain SMTP with no login (`SMTP_PORT`, default 25), meant for a relay on your network. `EMAIL_FROM` defaults to `EMAIL_TO`. A mail failure is logged and never affects the call.
+
 ## Updating
 
 ```bash

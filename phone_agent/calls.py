@@ -20,6 +20,7 @@ from .db import Database
 from .dialog import Brief, Dialog
 from .dialing import normalize_number
 from .inbound import PROFILES
+from .notify import email_call, wants_email
 from .session import (BEAR_WITH_ME, FILLERS, RECORDING_NOTICE, CallSession, opening_lines, split_sentences,
                       unavailable_line)
 from .speech import Speech
@@ -396,6 +397,16 @@ class CallManager:
             call.ended = time.time()
             call.changed()
             call.done.set()
+            if call.connected.is_set():
+                self._email(call)
+
+    def _email(self, call: CallState) -> None:
+        """Email the finished call's report, in the background (EMAIL_TO)."""
+        if not wants_email(self.cfg, call.brief.direction):
+            return
+        task = asyncio.create_task(email_call(self.cfg, call.to_row(), f"{self.cfg.public_url}/calls/{call.id}"))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     def _too_late(self, call: CallState) -> bool:
         """Outside calling hours: the call fails instead of dialling."""
@@ -468,3 +479,4 @@ class CallManager:
                 call.ended = time.time()
                 call.changed()
                 call.done.set()
+                self._email(call)

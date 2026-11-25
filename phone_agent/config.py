@@ -105,6 +105,14 @@ class Config:
     max_hold_seconds: int = 1800
     # In-call LLM for incoming calls, same format as dialog_llm. Empty = use dialog_llm.
     inbound_dialog_llm: str = ""
+    # Email a report when a call ends (notify.py). Off unless email_to and smtp_host are set.
+    smtp_host: str = ""
+    smtp_port: int = 25
+    email_to: str = ""
+    email_from: str = ""
+    email_calls: str = "inbound"  # "inbound" or "all"
+    email_max_mb: float = 15.0  # bigger recordings are linked, not attached
+    public_url: str = ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -156,8 +164,22 @@ class Config:
             dial_rules=_dial_rules(),
             inbound_dialog_llm=_env("INBOUND_DIALOG_LLM", "").strip(),
             max_hold_seconds=int(_env("MAX_HOLD_SECONDS", "1800")),
+            smtp_host=_env("SMTP_HOST", "").strip(),
+            smtp_port=int(_env("SMTP_PORT", "25")),
+            email_to=_env("EMAIL_TO", "").strip(),
+            email_from=_env("EMAIL_FROM", "").strip(),
+            email_calls=_email_calls(),
+            email_max_mb=float(_env("EMAIL_MAX_MB", "15")),
+            public_url=_env("PUBLIC_URL", f"http://localhost:{_env('HTTP_PORT', '8090')}").rstrip("/"),
             **_approval(),
         )
+
+
+def _email_calls() -> str:
+    which = _env("EMAIL_CALLS", "inbound").strip().lower()
+    if which not in ("inbound", "all"):
+        raise ValueError(f"EMAIL_CALLS must be inbound or all, not {which!r}")
+    return which
 
 
 APPROVAL_MODES = ("off", "new_numbers", "all")
