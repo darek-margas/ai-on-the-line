@@ -62,12 +62,17 @@ def _is_emergency(digits: str, region: str) -> bool:
         return False
 
 
+def dial_digits(phone: str) -> str:
+    """The number as typed, down to digits and a leading +: "02 5550-1234" -> "0255501234"."""
+    return re.sub(r"[^\d+]", "", phone)
+
+
 def normalize_number(phone: str, rules: DialRules | None = None) -> str:
     """The number to dial, in the form the PBX expects, or ValueError if the
     rules don't allow it."""
     rules = rules or DialRules()
     region = rules.country.upper()
-    digits = re.sub(r"[^\d+]", "", phone)
+    digits = dial_digits(phone)
     refuse = f"won't dial {phone!r}: the dialling rules allow {rules.describe()}"
     if not digits or _is_emergency(digits, region):
         raise ValueError(f"won't dial {phone!r}: emergency or empty number")

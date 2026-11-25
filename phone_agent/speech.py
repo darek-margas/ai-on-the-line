@@ -90,7 +90,7 @@ class Speech:
             pcm = await asyncio.wait_for(self._synthesize(text), TTS_TIMEOUT_SECONDS)
         except TimeoutError:
             raise SpeechTimeout(f"Wyoming TTS {self.tts[0]}:{self.tts[1]} didn't answer in {TTS_TIMEOUT_SECONDS} s")
-        if len(text) <= CACHE_MAX_TEXT and text not in self._tts_cache:
+        if len(text) <= CACHE_MAX_TEXT and len(pcm) <= CACHE_MAX_BYTES and text not in self._tts_cache:
             self._tts_cache[text] = pcm
             self._cache_bytes += len(pcm)
             while self._cache_bytes > CACHE_MAX_BYTES and len(self._tts_cache) > 1:

@@ -69,6 +69,8 @@ FILLERS = ["Let me think.", "Let me see.", "Hmm, let me see."]
 # dead air: after the first, a short "bear with me"; after the second, goodbye.
 TURN_TIMEOUTS = (10.0, 8.0)
 STREAMING_TURN_SECONDS = 30.0  # once words are coming out, the rest may take longer
+HANGUP_DRAIN_SECONDS = 2.0  # a PBX that stops reading doesn't hold the call open
+SETTLE_SECONDS = 5.0  # for cancelled tasks to finish before the call is handed back
 BEAR_WITH_ME = "Sorry, bear with me a second."
 
 
@@ -368,6 +370,14 @@ def is_echo(heard: str, our_line: str) -> bool:
     return sum(w in ours for w in heard_words) / len(heard_words) >= ECHO_OVERLAP
 
 
+async def settle(tasks, what: str) -> None:
+    """Wait for cancelled tasks to finish, up to SETTLE_SECONDS."""
+    try:
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), SETTLE_SECONDS)
+    except TimeoutError:
+        log.warning("%s: tasks still running %.0f s after being cancelled", what, SETTLE_SECONDS)
+
+
 class CallSession:
     def __init__(
         self,
@@ -462,15 +472,19 @@ class CallSession:
             log.exception("call %s failed", self.call.id)
             self.call.error = repr(exc)
         finally:
-            if not self.hung_up:
-                try:
+            try:
+                if not self.hung_up:
                     self.writer.write(ass.encode(ass.KIND_HANGUP))
-                    await self.writer.drain()
-                except ConnectionError:
-                    pass
-            for task in tasks:
-                task.cancel()
-            self.writer.close()
+                    await asyncio.wait_for(self.writer.drain(), HANGUP_DRAIN_SECONDS)
+            except Exception as exc:
+                log.info("call %s: couldn't send the hangup: %r", self.call.id, exc)
+            finally:
+                for task in tasks:
+                    task.cancel()
+                self.writer.close()
+                # After this the call is wrapped up and forgotten: nothing of
+                # ours may still be running to change it.
+                await settle(tasks, f"call {self.call.id}")
 
     # Conversation
 
@@ -481,7 +495,7 @@ class CallSession:
         call = self.call
         while not converse.done():
             await asyncio.sleep(1)
-            if call.outcome == "hung_up_by_owner":
+            if call.cancel_requested:
                 log.info("call %s: hung up by the owner", call.id)
             elif (self._on_hold and self._hold_started is not None
                   and time.monotonic() - self._hold_started > self.max_hold_seconds + DEADLINE_GRACE_SECONDS):
@@ -951,6 +965,7 @@ class CallSession:
         finally:
             if not task.done():
                 task.cancel()
+                await settle([task], f"call {call.id} model turn")
 
     async def _follow_intro(self) -> bool:
         """Prepare the first question while the introduction plays, and ask it if

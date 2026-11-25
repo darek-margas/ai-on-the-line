@@ -199,3 +199,19 @@ async def test_time_limit_holds_while_a_turn_is_stuck(tmp_path, monkeypatch):
     call, received = await _inbound_with(tmp_path, StuckDialog(), cfg)
     assert call.outcome == "time_limit"
     assert ass.KIND_HANGUP in received
+
+
+@pytest.mark.asyncio
+async def test_owner_hang_up_works_after_an_outcome_is_set(tmp_path):
+    """The outcome is written once; cancelling mustn't depend on it being free."""
+    dialog = StuckDialog()
+
+    async def hang_up_after_outcome(manager, call):
+        while not dialog.calls:
+            await asyncio.sleep(0.05)
+        call.set_outcome("completed")  # as if the model had already said goodbye
+        assert await manager.hang_up(call.id)
+
+    call, received = await _inbound_with(tmp_path, dialog, act=hang_up_after_outcome)
+    assert call.outcome == "completed" and call.cancel_requested
+    assert ass.KIND_HANGUP in received

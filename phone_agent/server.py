@@ -157,8 +157,8 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             may_share: Facts the agent may tell the callee (dates, party size, the owner's name, callback number...). For a detail it should give only if asked, write "<what it is>, only when asked: <value>", e.g. "Model, only when asked: the Pro Max", and keep that value out of goal and opening_line.
             must_not: Extra things the agent must never do. Booking, paying and committing are always forbidden.
             context: Background that helps the agent handle follow-up questions.
-            callee_timezone: IANA zone if the callee isn't in the default zone, for the calling-hours check.
-            ignore_calling_hours: Only for test calls to the owner's own phone.
+            callee_timezone: IANA zone if the callee isn't in the default zone, for the calling-hours check. Use the callee's real zone; the owner sees it on the approval page.
+            ignore_calling_hours: Only for test calls to the owner's own phone. The owner sees it on the approval page.
             run_at: Place the call later: local time in the callee's timezone, "2026-11-20 09:30". Up to 30 days ahead.
             max_minutes: Time limit for this call, if it needs longer than the server's default (MAX_CALL_SECONDS); up to 120. Time on hold isn't counted, and the call may also wait this long in a queue (instead of MAX_HOLD_SECONDS).
             recording_notice: When their recorded announcement says the call is recorded, say ours is too (only to the recording, never to a person). Default: the server's RECORDING_NOTICE.
@@ -435,7 +435,10 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
             shared = "".join(f"<li>{esc(x)}</li>" for x in brief.get("may_share") or [])
             details = (
                 f"<p>Dials <b>{esc(call['phone'])}</b> {due_text}.</p>"
-                f"<p><b>Opening line:</b> {esc(brief.get('opening_line') or '')}</p>"
+                + (f"<p><b>Ignores calling hours.</b></p>" if schedule.get("ignore_hours") else
+                   f"<p>Calling hours checked in {esc(schedule['zone'])}.</p>"
+                   if schedule.get("zone") and schedule["zone"] != cfg.timezone else "")
+                + f"<p><b>Opening line:</b> {esc(brief.get('opening_line') or '')}</p>"
                 f"<p><b>Questions</b></p><ul>{questions}</ul>"
                 + (f"<p><b>May tell them</b></p><ul>{shared}</ul>" if shared else "")
                 + (f"<p><b>Context:</b> {esc(brief['context'])}</p>" if brief.get("context") else "")

@@ -18,7 +18,7 @@ from .ari import Ari
 from .config import Config
 from .db import Database
 from .dialog import Brief, Dialog
-from .dialing import normalize_number
+from .dialing import dial_digits, normalize_number
 from .inbound import PROFILES
 from .notify import email_call, wants_email
 from .session import (BEAR_WITH_ME, FILLERS, RECORDING_NOTICE, CallSession, opening_lines, split_sentences,
@@ -66,6 +66,9 @@ class CallState:
     conversation_over: asyncio.Event = field(default_factory=asyncio.Event)
     done: asyncio.Event = field(default_factory=asyncio.Event)  # final state saved
     dialog_down: bool = False  # the model failed: apologise and end instead of trying again
+    # The owner hung up or cancelled. Separate from outcome, which is written
+    # once: a call that already has one (the model said goodbye) still stops.
+    cancel_requested: bool = False
 
     def add_transcript(self, who: str, text: str, at: float | None = None) -> None:
         """at: when the line was said (time.time()), if not now."""
@@ -210,7 +213,7 @@ class CallManager:
     def hours_error(self, phone: str, zone: str, ignore: bool, at: float | None = None) -> str | None:
         """Why the call can't go out at `at` (default now) under CALL_HOURS, or None."""
         extensions = self.cfg.dial_rules.extensions
-        if ignore or (extensions and re.fullmatch(extensions, re.sub(r"[\s\-()]", "", phone))):
+        if ignore or (extensions and re.fullmatch(extensions, dial_digits(phone))):
             return None  # extensions ring any time
         tz = ZoneInfo(zone)
         local = datetime.fromtimestamp(at or time.time(), tz)
@@ -227,7 +230,7 @@ class CallManager:
             call.wake.clear()
             if call.status == "cancelled":
                 return False
-            if call.outcome == "hung_up_by_owner":
+            if call.cancel_requested:
                 call.status = "cancelled"
                 return False
             now = time.time()
@@ -336,6 +339,7 @@ class CallManager:
         call = self.calls.get(call_id)
         if call is None or call.status in FINAL_STATUSES:
             return False
+        call.cancel_requested = True
         call.set_outcome("hung_up_by_owner")
         call.wake.set()  # stops a call that's waiting for approval or its time
         if call.channel_id:
@@ -383,26 +387,29 @@ class CallManager:
         meanwhile: it gives the line up without warming anything up."""
         acquire = asyncio.ensure_future(self._slots.acquire())
         try:
-            while not acquire.done() and call.outcome != "hung_up_by_owner":
+            while not acquire.done() and not call.cancel_requested:
                 call.wake.clear()
                 wake = asyncio.ensure_future(call.wake.wait())
                 try:
                     await asyncio.wait({acquire, wake}, return_when=asyncio.FIRST_COMPLETED)
                 finally:
                     wake.cancel()
-        finally:
-            if not acquire.done():
-                acquire.cancel()
-        try:
-            await acquire
-        except asyncio.CancelledError:
-            if asyncio.current_task().cancelling():
-                raise  # we're being cancelled ourselves, not just the wait
-            return False
-        if call.outcome == "hung_up_by_owner":
-            self._slots.release()
+        except BaseException:
+            # We're being cancelled ourselves. The acquire may have just won a
+            # line that nobody would release: give it back.
+            self._give_back(acquire)
+            raise
+        if call.cancel_requested or not acquire.done():
+            self._give_back(acquire)
             return False
         return True
+
+    def _give_back(self, acquire: asyncio.Future) -> None:
+        """Undo a line request: release it if it was granted, else withdraw it."""
+        if not acquire.done():
+            acquire.cancel()  # Semaphore.acquire passes a wake-up it can't use on
+        elif not acquire.cancelled() and acquire.exception() is None:
+            self._slots.release()
 
     def _forget(self, call: CallState) -> None:
         """An ended call lives in SQLite only; get() reads it from there."""
@@ -431,7 +438,7 @@ class CallManager:
         for line in opening_lines(call.brief.opening_line) + FILLERS + notice + gone:
             for sentence in split_sentences(line):  # as _say will ask for them
                 await self.speech.synthesize(sentence)
-        if call.outcome == "hung_up_by_owner":
+        if call.cancel_requested:
             return  # cancelled while warming up: never dial
         # Again: it may have waited a long time for a slot.
         if self._too_late(call):
@@ -442,18 +449,27 @@ class CallManager:
         call.channel_id = str(uuid.uuid4())
         call.changed()
         number = normalize_number(call.phone, self.cfg.dial_rules)
-        call.channel_id = await self.ari.originate(
-            self.cfg.dial_endpoint.format(number=number),
-            call.id,
-            self.cfg.caller_id,
-            self.cfg.audiosocket_advertise,
-            self.cfg.ring_timeout_seconds,
-            channel_id=call.channel_id,
-        )
-        if call.outcome == "hung_up_by_owner":
-            await self.ari.hangup(call.channel_id)  # cancelled while the dial request was in flight
-            return
-        if await self._wait_connected(call):
+        try:
+            await self.ari.originate(
+                self.cfg.dial_endpoint.format(number=number),
+                call.id,
+                self.cfg.caller_id,
+                self.cfg.audiosocket_advertise,
+                self.cfg.ring_timeout_seconds,
+                channel_id=call.channel_id,
+            )
+            if call.cancel_requested:
+                await self.ari.hangup(call.channel_id)  # cancelled while the dial request was in flight
+                return
+            answered = await self._wait_connected(call)
+        except Exception:
+            if not call.connected.is_set():
+                raise
+            # The audio is up, so the PBX did dial whatever ARI said. Keep the
+            # line and the call until the conversation ends.
+            log.warning("call %s: ARI failed after the call connected; carrying on", call.id, exc_info=True)
+            answered = True
+        if answered:
             await call.conversation_over.wait()
         else:
             call.status = "not_answered"
@@ -502,7 +518,7 @@ class CallManager:
             return
         call = self.calls.get(call_id)
         if (call is None or call.connected.is_set() or call.status not in CONNECTABLE_STATUSES
-                or call.outcome == "hung_up_by_owner"):
+                or call.cancel_requested):
             # Unknown, already on the line, or late: the call gave up waiting
             # (not answered, the PBX was too slow, the owner cancelled it).
             log.warning("AudioSocket for %s call %s", call.status if call else "unknown", call_id)

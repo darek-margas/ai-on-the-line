@@ -205,3 +205,93 @@ def test_calling_hours_use_the_extension_rules_and_can_cross_midnight(tmp_path):
     assert "calling hours are 22:00-02:00" in manager.hours_error("0255501234", zone, False, at(12))
     assert manager.hours_error("799912", zone, False, at(12)) is None  # a 6-digit extension
     assert manager.hours_error("13 22 00", zone, False, at(12))  # short, but not an extension
+
+
+async def test_ari_failing_after_the_audio_connects_keeps_the_call(tmp_path, monkeypatch):
+    """The PBX dialled and the call is up, but the originate reply never came."""
+    import phone_agent.vad as vad
+    from test_call_flow import FakeAri
+
+    monkeypatch.setattr(vad.webrtcvad.Vad, "is_speech", lambda self, frame, rate: max(frame) > 8)
+    cfg = make_config(tmp_path)
+    manager = CallManager(cfg, Database(cfg.data_dir), FakeSpeech(), FakeDialog(), None)
+    server = await asyncio.start_server(manager.handle_audiosocket, "127.0.0.1", 0)
+
+    class LateFailingAri(FakeAri):
+        hangups = []
+
+        async def originate(self, endpoint, call_id, caller_id, audiosocket, timeout, channel_id=None):
+            await super().originate(endpoint, call_id, caller_id, audiosocket, timeout, channel_id)
+            call = manager.calls[call_id]
+            await asyncio.wait_for(call.connected.wait(), 5)
+            raise ConnectionError("ARI reply lost")
+
+        async def hangup(self, channel_id):
+            self.hangups.append(channel_id)
+
+    ari = LateFailingAri(server.sockets[0].getsockname()[1])
+    manager.ari = ari
+    try:
+        call = manager.start_call("0255501234", BRIEF)
+        await asyncio.wait_for(call.connected.wait(), 10)
+        await asyncio.sleep(0.2)
+        assert call.id in manager.calls and manager._slots._value == 0  # still ours, line still held
+        await asyncio.wait_for(call.done.wait(), 30)
+        await asyncio.wait_for(ari.task, 10)
+    finally:
+        server.close()
+    assert call.conversation_over.is_set()  # wrapped up only after the conversation
+    assert call.status == "finished" and call.transcript
+    assert manager._slots._value == 1
+
+
+async def test_cancelled_while_winning_a_line_gives_it_back(tmp_path):
+    cfg = make_config(tmp_path)
+    manager = CallManager(cfg, Database(cfg.data_dir), FakeSpeech(), FakeDialog(), None)
+    call = CallState(id=str(uuid.uuid4()), phone="0255501234", brief=BRIEF, owner="Alex", db=manager.db)
+    await manager._slots.acquire()  # another call holds the only line
+    waiting = asyncio.create_task(manager._take_slot(call))
+    await asyncio.sleep(0.05)
+    manager._slots.release()  # the line comes free: the acquire wins it...
+    waiting.cancel()  # ...in the same moment as we're cancelled
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+    assert manager._slots._value == 1
+
+
+async def test_cancelled_while_waiting_for_a_line_withdraws(tmp_path):
+    cfg = make_config(tmp_path)
+    manager = CallManager(cfg, Database(cfg.data_dir), FakeSpeech(), FakeDialog(), None)
+    call = CallState(id=str(uuid.uuid4()), phone="0255501234", brief=BRIEF, owner="Alex", db=manager.db)
+    await manager._slots.acquire()
+    waiting = asyncio.create_task(manager._take_slot(call))
+    await asyncio.sleep(0.05)
+    waiting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+    manager._slots.release()
+    await asyncio.sleep(0)
+    assert manager._slots._value == 1
+
+
+async def test_tts_cache_skips_audio_bigger_than_the_cache(monkeypatch):
+    monkeypatch.setattr(speech_mod, "CACHE_MAX_BYTES", 3000)
+    speech = Speech(("x", 1), ("x", 1), "en", "")
+
+    async def fake(text):
+        return bytes(4000 if text == "long" else 1000)
+
+    speech._synthesize = fake
+    await speech.synthesize("a")
+    await speech.synthesize("long")
+    assert list(speech._tts_cache) == ["a"] and speech._cache_bytes == 1000
+
+
+def test_calling_hours_clean_up_the_number_like_the_dialler(tmp_path):
+    cfg = make_config(tmp_path)
+    cfg = dataclasses.replace(cfg, call_hours=("09:00", "17:00"),
+                              dial_rules=dataclasses.replace(cfg.dial_rules, extensions=r"7\d{3}"))
+    manager = CallManager(cfg, Database(cfg.data_dir), FakeSpeech(), FakeDialog(), None)
+    night = datetime(2026, 11, 26, 23, 0, tzinfo=ZoneInfo("Australia/Sydney")).timestamp()
+    assert calls_mod.normalize_number("7.123", cfg.dial_rules) == "7123"
+    assert manager.hours_error("7.123", "Australia/Sydney", False, night) is None
