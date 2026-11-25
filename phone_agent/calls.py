@@ -30,6 +30,11 @@ log = logging.getLogger(__name__)
 FINAL_STATUSES = {"finished", "not_answered", "failed", "cancelled"}
 PENDING_STATUSES = {"awaiting_approval", "scheduled"}  # not dialling yet, hold no slot
 INBOUND_CONNECT_SECONDS = 30  # registered incoming call whose audio never arrives
+AUDIOSOCKET_HELLO_SECONDS = 5  # Asterisk sends the call's UUID at once; a silent socket isn't Asterisk
+# Only these may take an AudioSocket connection: an outbound call we dialled or an
+# incoming call the PBX registered. Anything else is late (the call already
+# ended) or forged.
+CONNECTABLE_STATUSES = {"dialing", "ringing"}
 WARM_UP_SECONDS = 300  # a cold Ollama load takes minutes; longer than this, it's stuck
 
 
@@ -204,12 +209,15 @@ class CallManager:
 
     def hours_error(self, phone: str, zone: str, ignore: bool, at: float | None = None) -> str | None:
         """Why the call can't go out at `at` (default now) under CALL_HOURS, or None."""
-        if ignore or len(re.sub(r"\D", "", phone)) <= 5:  # extensions ring any time
-            return None
+        extensions = self.cfg.dial_rules.extensions
+        if ignore or (extensions and re.fullmatch(extensions, re.sub(r"[\s\-()]", "", phone))):
+            return None  # extensions ring any time
         tz = ZoneInfo(zone)
         local = datetime.fromtimestamp(at or time.time(), tz)
         start, end = self.cfg.call_hours
-        if start <= local.strftime("%H:%M") < end:
+        now = local.strftime("%H:%M")
+        # Start after end ("22:00-02:00") means the window runs past midnight.
+        if (start <= now < end) if start <= end else (now >= start or now < end):
             return None
         return f"It's {local:%H:%M} {tz.key} for the callee then; calling hours are {start}-{end}."
 
@@ -270,6 +278,7 @@ class CallManager:
             call.ended = time.time()
             call.changed()
             call.done.set()
+            self._forget(call)
             raise
         task = asyncio.create_task(self._watch_inbound(call))
         self._tasks.add(task)
@@ -297,6 +306,7 @@ class CallManager:
             call.ended = time.time()
             call.changed()
             call.done.set()
+            self._forget(call)
 
     def get(self, call_id: str) -> dict[str, Any] | None:
         if call_id in self.calls:
@@ -342,55 +352,22 @@ class CallManager:
                 call.changed()
             if self._too_late(call):
                 return
-            async with self._slots:
-                # Wake the LLM and Whisper and pre-render both openings before
-                # dialing, so the callee never waits on a cold start.
-                try:
-                    await asyncio.wait_for(self.dialog.warm_up(call.brief), WARM_UP_SECONDS)
-                except Exception as exc:
-                    # Out of credit, Ollama down or stuck: don't ring someone only to
-                    # apologise and hang up.
-                    log.warning("call %s: dialog model unavailable, not dialling: %r", call.id, exc)
-                    call.status = "failed"
-                    call.error = f"dialog LLM unavailable, not dialled: {exc!r}"
-                    return
-                try:
-                    await self.speech.transcribe(bytes(self.speech.rate))  # 0.5 s of silence
-                except Exception:
-                    log.warning("call %s: Whisper warm-up failed, calling anyway", call.id, exc_info=True)
-                notice = [RECORDING_NOTICE] if call.brief.recording_notice else []
-                gone = [BEAR_WITH_ME, unavailable_line(call.owner, False)]
-                for line in opening_lines(call.brief.opening_line) + FILLERS + notice + gone:
-                    for sentence in split_sentences(line):  # as _say will ask for them
-                        await self.speech.synthesize(sentence)
-                if call.outcome == "hung_up_by_owner":
-                    return  # cancelled while queued or warming up: never dial
-                # Again: it may have waited a long time for a slot.
-                if self._too_late(call):
-                    return
-                call.status = "dialing"
-                call.changed()
-                number = normalize_number(call.phone, self.cfg.dial_rules)
-                call.channel_id = await self.ari.originate(
-                    self.cfg.dial_endpoint.format(number=number),
-                    call.id,
-                    self.cfg.caller_id,
-                    self.cfg.audiosocket_advertise,
-                    self.cfg.ring_timeout_seconds,
-                )
-                if call.outcome == "hung_up_by_owner":
-                    await self.ari.hangup(call.channel_id)  # cancelled while the dial request was in flight
-                    return
-                if await self._wait_connected(call):
-                    await call.conversation_over.wait()
-                else:
-                    call.status = "not_answered"
-                    call.set_outcome("not_answered")
-                    await self.ari.hangup(call.channel_id)
+            if not await self._take_slot(call):
+                return  # cancelled while it waited for a free line
+            try:
+                await self._dial(call)
+            finally:
+                self._slots.release()
         except Exception as exc:
             log.exception("call %s failed", call.id)
             call.status = "failed"
             call.error = call.error or repr(exc)
+            if call.channel_id and not call.connected.is_set():
+                # Don't leave the PBX ringing someone we've given up on.
+                try:
+                    await self.ari.hangup(call.channel_id)
+                except Exception:
+                    log.warning("call %s: couldn't hang up its channel after the failure", call.id, exc_info=True)
         finally:
             if call.status not in FINAL_STATUSES:
                 call.status = "finished"
@@ -399,6 +376,89 @@ class CallManager:
             call.done.set()
             if call.connected.is_set():
                 self._email(call)
+            self._forget(call)
+
+    async def _take_slot(self, call: CallState) -> bool:
+        """Wait for a free outgoing line. False if the owner cancels the call
+        meanwhile: it gives the line up without warming anything up."""
+        acquire = asyncio.ensure_future(self._slots.acquire())
+        try:
+            while not acquire.done() and call.outcome != "hung_up_by_owner":
+                call.wake.clear()
+                wake = asyncio.ensure_future(call.wake.wait())
+                try:
+                    await asyncio.wait({acquire, wake}, return_when=asyncio.FIRST_COMPLETED)
+                finally:
+                    wake.cancel()
+        finally:
+            if not acquire.done():
+                acquire.cancel()
+        try:
+            await acquire
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                raise  # we're being cancelled ourselves, not just the wait
+            return False
+        if call.outcome == "hung_up_by_owner":
+            self._slots.release()
+            return False
+        return True
+
+    def _forget(self, call: CallState) -> None:
+        """An ended call lives in SQLite only; get() reads it from there."""
+        if self.calls.get(call.id) is call:
+            del self.calls[call.id]
+
+    async def _dial(self, call: CallState) -> None:
+        """Holding a line: warm up, dial, and wait for the conversation to end."""
+        # Wake the LLM and Whisper and pre-render both openings before
+        # dialing, so the callee never waits on a cold start.
+        try:
+            await asyncio.wait_for(self.dialog.warm_up(call.brief), WARM_UP_SECONDS)
+        except Exception as exc:
+            # Out of credit, Ollama down or stuck: don't ring someone only to
+            # apologise and hang up.
+            log.warning("call %s: dialog model unavailable, not dialling: %r", call.id, exc)
+            call.status = "failed"
+            call.error = f"dialog LLM unavailable, not dialled: {exc!r}"
+            return
+        try:
+            await self.speech.transcribe(bytes(self.speech.rate))  # 0.5 s of silence
+        except Exception:
+            log.warning("call %s: Whisper warm-up failed, calling anyway", call.id, exc_info=True)
+        notice = [RECORDING_NOTICE] if call.brief.recording_notice else []
+        gone = [BEAR_WITH_ME, unavailable_line(call.owner, False)]
+        for line in opening_lines(call.brief.opening_line) + FILLERS + notice + gone:
+            for sentence in split_sentences(line):  # as _say will ask for them
+                await self.speech.synthesize(sentence)
+        if call.outcome == "hung_up_by_owner":
+            return  # cancelled while warming up: never dial
+        # Again: it may have waited a long time for a slot.
+        if self._too_late(call):
+            return
+        call.status = "dialing"
+        # Our id for the channel, chosen before the request: if the reply is lost,
+        # the PBX may be dialling anyway, and this is what hangs it up.
+        call.channel_id = str(uuid.uuid4())
+        call.changed()
+        number = normalize_number(call.phone, self.cfg.dial_rules)
+        call.channel_id = await self.ari.originate(
+            self.cfg.dial_endpoint.format(number=number),
+            call.id,
+            self.cfg.caller_id,
+            self.cfg.audiosocket_advertise,
+            self.cfg.ring_timeout_seconds,
+            channel_id=call.channel_id,
+        )
+        if call.outcome == "hung_up_by_owner":
+            await self.ari.hangup(call.channel_id)  # cancelled while the dial request was in flight
+            return
+        if await self._wait_connected(call):
+            await call.conversation_over.wait()
+        else:
+            call.status = "not_answered"
+            call.set_outcome("not_answered")
+            await self.ari.hangup(call.channel_id)
 
     def _email(self, call: CallState) -> None:
         """Email the finished call's report, in the background (EMAIL_TO)."""
@@ -431,14 +491,21 @@ class CallManager:
 
     async def handle_audiosocket(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
-            call_id = await ass.read_call_uuid(reader)
+            call_id = await asyncio.wait_for(ass.read_call_uuid(reader), AUDIOSOCKET_HELLO_SECONDS)
+        except TimeoutError:
+            log.warning("AudioSocket connection sent no call id in %d s", AUDIOSOCKET_HELLO_SECONDS)
+            writer.close()
+            return
         except (ValueError, asyncio.IncompleteReadError) as exc:
             log.warning("bad AudioSocket connection: %s", exc)
             writer.close()
             return
         call = self.calls.get(call_id)
-        if call is None or call.connected.is_set():
-            log.warning("AudioSocket for unknown call %s", call_id)
+        if (call is None or call.connected.is_set() or call.status not in CONNECTABLE_STATUSES
+                or call.outcome == "hung_up_by_owner"):
+            # Unknown, already on the line, or late: the call gave up waiting
+            # (not answered, the PBX was too slow, the owner cancelled it).
+            log.warning("AudioSocket for %s call %s", call.status if call else "unknown", call_id)
             writer.write(ass.encode(ass.KIND_HANGUP))
             writer.close()
             return
@@ -480,3 +547,4 @@ class CallManager:
                 call.changed()
                 call.done.set()
                 self._email(call)
+                self._forget(call)

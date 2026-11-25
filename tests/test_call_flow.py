@@ -54,7 +54,7 @@ class FakeAri:
         self.received: list[int] = []
         self.task = None
 
-    async def originate(self, endpoint, call_id, caller_id, audiosocket, timeout):
+    async def originate(self, endpoint, call_id, caller_id, audiosocket, timeout, channel_id=None):
         self.task = asyncio.create_task(self._asterisk(call_id))
         return "chan-1"
 

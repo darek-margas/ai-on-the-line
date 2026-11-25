@@ -49,11 +49,11 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
             type=ref,event=tag
+      # Build into the runner's Docker and smoke-test it before anything is pushed.
       - uses: docker/build-push-action@v7
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          load: true  # also into the runner's Docker, for the smoke test
+          load: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -62,3 +62,12 @@ jobs:
         run: |
           docker run --rm --entrypoint python ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
             -c "import phone_agent.server, phone_agent.auth; print('imports ok')"
+      # The same build again from the cache, now pushed.
+      - uses: docker/build-push-action@v7
+        if: github.event_name != 'pull_request'
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

@@ -9,8 +9,11 @@ class Ari:
     def __init__(self, url: str, user: str, password: str):
         self.http = httpx.AsyncClient(base_url=url, auth=(user, password), timeout=10)
 
-    async def originate(self, endpoint: str, call_id: str, caller_id: str, audiosocket: str, timeout: int) -> str:
-        """Dial out; when answered, the channel runs [phone-agent] which connects AudioSocket."""
+    async def originate(self, endpoint: str, call_id: str, caller_id: str, audiosocket: str, timeout: int,
+                        channel_id: str | None = None) -> str:
+        """Dial out; when answered, the channel runs [phone-agent] which connects AudioSocket.
+        channel_id: the id the channel gets, chosen by us so a lost reply can't
+        leave a call ringing that we have no name for."""
         params = {
             "endpoint": endpoint,
             "context": "phone-agent",
@@ -20,6 +23,8 @@ class Ari:
         }
         if caller_id:
             params["callerId"] = caller_id
+        if channel_id:
+            params["channelId"] = channel_id
         response = await self.http.post(
             "/channels",
             params=params,

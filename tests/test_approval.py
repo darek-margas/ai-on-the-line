@@ -21,7 +21,7 @@ class CountingAri:
     def __init__(self):
         self.dialled = []
 
-    async def originate(self, endpoint, *args):
+    async def originate(self, endpoint, *args, **kwargs):
         self.dialled.append(endpoint)
         return "chan-1"
 
