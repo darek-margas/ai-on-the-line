@@ -70,11 +70,20 @@ class CallState:
     # once: a call that already has one (the model said goodbye) still stops.
     cancel_requested: bool = False
 
-    def add_transcript(self, who: str, text: str, at: float | None = None) -> None:
-        """at: when the line was said (time.time()), if not now."""
-        self.transcript.append((who, text))
-        self.timings.append(round((at or time.time()) - self.started, 1) if self.started else None)
+    def add_transcript(self, who: str, text: str, at: float | None = None) -> bool:
+        """at: when the line was said (time.time()), if not now. A line that began
+        before our latest lines started (it took a while to transcribe) goes in
+        before them, where it was said. True if it did."""
+        when = round((at or time.time()) - self.started, 1) if self.started else None
+        i = len(self.transcript)
+        if at is not None and when is not None:
+            while (i > 0 and self.transcript[i - 1][0] == "agent"
+                   and self.timings[i - 1] is not None and self.timings[i - 1] > when):
+                i -= 1
+        self.transcript.insert(i, (who, text))
+        self.timings.insert(i, when)
         self.changed()
+        return i < len(self.transcript) - 1
 
     def mark_interrupted(self) -> None:
         for i in range(len(self.transcript) - 1, -1, -1):

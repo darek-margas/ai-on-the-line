@@ -436,6 +436,7 @@ class CallSession:
         self._speaking_line = ""  # what we're saying now (for the echo check)
         self._overlapped_line: str | None = None
         self._heard_over_us = False
+        self._heard_before_us = False
         self._last_filler = ""
         self._filled_last_turn = False
         self._last_said_at = 0.0
@@ -657,6 +658,7 @@ class CallSession:
                 silent_for = 0
                 self._greeting_pause = False  # the recording carried on
                 asked = self._just_asked()
+                self._heard_before_us = False
                 heard = [await self._heard(item)]
                 # They may have kept talking while we were busy; take it all in.
                 while not self.utterances.empty():
@@ -777,6 +779,12 @@ class CallSession:
                         "Right after your question they said something short that speech recognition "
                         "heard as a thank-you. It may be a garbled short answer: briefly ask them to "
                         "repeat it (e.g. 'Sorry, was that three?' if you can guess)."
+                    )
+                elif self._heard_before_us:
+                    event = (
+                        "The callee spoke just before your latest line started (their words are just "
+                        "above it), so it doesn't answer it. Respond to what they said if needed, and "
+                        "wait for the answer to your latest question."
                     )
                 elif self._heard_over_us:
                     event = (
@@ -979,10 +987,13 @@ class CallSession:
             self.dialog.next_turn(call.brief, list(call.transcript), dict(call.answers), INTRO_EVENT, list(call.notes))
         )
         await self._wait_drained(timeout=30)
-        try:
-            item = await asyncio.wait_for(self.utterances.get(), INTRO_PAUSE_SECONDS)
-        except TimeoutError:
-            item = None
+        item = await self._next_utterance(INTRO_PAUSE_SECONDS)
+        # They started talking as the pause ran out ("Yes?"): let them finish
+        # instead of asking over them.
+        waited = 0.0
+        while item is None and self.segmenter.in_speech and waited < MID_SENTENCE_MAX_SECONDS:
+            item = await self._next_utterance(0.25)
+            waited += 0.25
         if item is not None:
             pending.cancel()
             self.utterances.put_nowait(item)  # they spoke (or hung up): the main loop handles it
@@ -1116,7 +1127,9 @@ class CallSession:
                 log.info("call %s: noise, resuming speech", self.call.id)
                 self._paused_at = None
         if text:
-            self.call.add_transcript("callee", text, at=began)
+            # Said before our latest line began: it can't answer that line.
+            if self.call.add_transcript("callee", text, at=began):
+                self._heard_before_us = True
             # Lets the dialog know it may not answer the question we were asking.
             self._heard_over_us = bool(overlapped_line)
         return text
