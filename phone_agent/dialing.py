@@ -57,9 +57,33 @@ def _is_emergency(digits: str, region: str) -> bool:
     if bare in ALWAYS_EMERGENCY:
         return True
     try:
-        return shortnumberinfo.is_emergency_number(bare, region)
+        # "connects": 9111 in the US still reaches 911.
+        return (shortnumberinfo.is_emergency_number(bare, region)
+                or shortnumberinfo.connects_to_emergency_number(bare, region))
     except Exception:
         return False
+
+
+def _prefixed_emergency(digits: str, region: str) -> bool:
+    """9000 or 0112: an emergency number behind the 9 or 0 many PBXs take for an
+    outside line."""
+    return len(digits) >= 3 and digits[0] in "90" and _is_emergency(digits[1:], region)
+
+
+def _public_short(digits: str, region: str) -> bool:
+    """A short number the public network knows (988, 1223, 101 in the UK): not ours."""
+    try:
+        return shortnumberinfo.is_valid_short_number_for_region(phonenumbers.parse(digits, region), region)
+    except Exception:
+        return False
+
+
+def is_extension(phone: str, rules: DialRules) -> bool:
+    """An internal extension: matches DIAL_EXTENSIONS and isn't a public short
+    number, which would otherwise skip approval and calling hours."""
+    digits = dial_digits(phone)
+    return bool(rules.extensions and re.fullmatch(rules.extensions, digits)
+                and not _public_short(digits, rules.country.upper()))
 
 
 def dial_digits(phone: str) -> str:
@@ -71,16 +95,34 @@ def normalize_number(phone: str, rules: DialRules | None = None) -> str:
     """The number to dial, in the form the PBX expects, or ValueError if the
     rules don't allow it."""
     rules = rules or DialRules()
+    number = _normalize(phone, rules)
+    if rules.block_pattern:
+        # However it was written: "+61 491 570 156" is the blocked 0491570156.
+        forms = {dial_digits(phone).lstrip("+"), number.lstrip("+")}
+        try:
+            parsed = phonenumbers.parse(number, rules.country.upper())
+            forms.add(re.sub(r"\D", "", phonenumbers.format_number(parsed, PhoneNumberFormat.NATIONAL)))
+            forms.add(re.sub(r"\D", "", phonenumbers.format_number(parsed, PhoneNumberFormat.E164)))
+        except phonenumbers.NumberParseException:
+            pass  # an extension
+        if any(re.fullmatch(rules.block_pattern, form) for form in forms):
+            raise ValueError(f"won't dial {phone!r}: the dialling rules allow {rules.describe()}")
+    return number
+
+
+def _normalize(phone: str, rules: DialRules) -> str:
     region = rules.country.upper()
     digits = dial_digits(phone)
     refuse = f"won't dial {phone!r}: the dialling rules allow {rules.describe()}"
     if not digits or _is_emergency(digits, region):
         raise ValueError(f"won't dial {phone!r}: emergency or empty number")
-    if rules.block_pattern and re.fullmatch(rules.block_pattern, digits.lstrip("+")):
-        raise ValueError(refuse)
-    if rules.extensions and re.fullmatch(rules.extensions, digits):
+    listed = bool(rules.allow_pattern and re.fullmatch(rules.allow_pattern, digits.lstrip("+")))
+    if _prefixed_emergency(digits, region) and not listed:
+        raise ValueError(f"won't dial {phone!r}: behind an outside-line prefix it is an emergency number "
+                         "(if it's a real extension, list it in DIAL_ALLOW_PATTERN)")
+    if is_extension(digits, rules):
         return digits
-    if rules.allow_pattern and re.fullmatch(rules.allow_pattern, digits.lstrip("+")):
+    if listed:
         return digits.lstrip("+")
 
     def parse(text: str):
@@ -102,7 +144,9 @@ def normalize_number(phone: str, rules: DialRules | None = None) -> str:
     if number is None:
         raise ValueError(refuse)
     home = phonenumbers.country_code_for_region(region)
-    if number.country_code != home and not rules.allow_international:
+    # Sharing a country code isn't being in the country: +1 876 is Jamaica.
+    abroad = number.country_code != home or not phonenumbers.is_valid_number_for_region(number, region)
+    if abroad and not rules.allow_international:
         raise ValueError(refuse)
     if not _type_allowed(number, rules):
         raise ValueError(refuse)

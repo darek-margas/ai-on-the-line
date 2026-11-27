@@ -21,7 +21,7 @@ import soxr
 from . import audiosocket as ass
 from . import dtmf
 from .dialog import Dialog, Turn, says_goodbye
-from .speech import Speech
+from .speech import Speech, SpeechTimeout
 from .vad import Segmenter
 
 if TYPE_CHECKING:
@@ -69,6 +69,10 @@ FILLERS = ["Let me think.", "Let me see.", "Hmm, let me see."]
 # dead air: after the first, a short "bear with me"; after the second, goodbye.
 TURN_TIMEOUTS = (10.0, 8.0)
 STREAMING_TURN_SECONDS = 30.0  # once words are coming out, the rest may take longer
+# In a call, a stuck Whisper or Piper is dead air: give up sooner than the
+# warm-up before dialling does (a cold Whisper can take 20 s there).
+IN_CALL_STT_SECONDS = 12.0
+IN_CALL_TTS_SECONDS = 10.0
 HANGUP_DRAIN_SECONDS = 2.0  # a PBX that stops reading doesn't hold the call open
 SETTLE_SECONDS = 5.0  # for cancelled tasks to finish before the call is handed back
 BEAR_WITH_ME = "Sorry, bear with me a second."
@@ -438,6 +442,8 @@ class CallSession:
         self._speech_began = 0.0  # time.time() the current utterance started
         self._heard_over_us = False
         self._heard_before_us = False
+        self._cut = False  # the line we're saying was interrupted
+        self._filler = False  # what's playing is only a "let me think"
         self._last_filler = ""
         self._filled_last_turn = False
         self._last_said_at = 0.0
@@ -473,6 +479,7 @@ class CallSession:
         except Exception as exc:
             log.exception("call %s failed", self.call.id)
             self.call.error = repr(exc)
+            await self._apologise()
         finally:
             try:
                 if not self.hung_up:
@@ -487,6 +494,39 @@ class CallSession:
                 # After this the call is wrapped up and forgotten: nothing of
                 # ours may still be running to change it.
                 await settle(tasks, f"call {self.call.id}")
+
+    async def _apologise(self) -> None:
+        """Something broke mid-call (Whisper or Piper stopped answering): say the
+        pre-rendered apology rather than cut them off without a word."""
+        call = self.call
+        call.set_outcome("technical_failure")
+        if self.hung_up:
+            return
+        line = unavailable_line(call.owner, call.brief.direction == "inbound")
+        try:
+            # Cached since before the call; if it isn't, Piper gets a moment.
+            parts = [await asyncio.wait_for(self.speech.synthesize(s), 3) for s in split_sentences(line)]
+        except Exception as exc:
+            log.warning("call %s: couldn't say the apology: %r", call.id, exc)
+            return
+        self._frames.clear()
+        call.add_transcript("agent", line)
+        self._speaking_line = line
+        for pcm in parts:
+            self._play(pcm, interruptible=False)
+        await self._wait_drained(timeout=15)
+
+    async def _stt(self, pcm: bytes) -> str:
+        try:
+            return await asyncio.wait_for(self.speech.transcribe(pcm), IN_CALL_STT_SECONDS)
+        except TimeoutError:
+            raise SpeechTimeout(f"speech recognition didn't answer in {IN_CALL_STT_SECONDS:.0f} s during the call")
+
+    async def _tts(self, text: str) -> bytes:
+        try:
+            return await asyncio.wait_for(self.speech.synthesize(text), IN_CALL_TTS_SECONDS)
+        except TimeoutError:
+            raise SpeechTimeout(f"speech synthesis didn't answer in {IN_CALL_TTS_SECONDS:.0f} s during the call")
 
     # Conversation
 
@@ -572,10 +612,12 @@ class CallSession:
                 answered = True
                 pcm = item[0]
                 text = await self._heard(item)
-                if text and is_hold_sound(text):
-                    # "Beep." before a voice bot or menu: a tone, not someone
-                    # answering. Wait for real first words, or introduce into silence.
-                    log.info("call %s: tone %r after answer, not a person; waiting", call.id, text)
+                if not text or is_hold_sound(text):
+                    # "Beep." before a voice bot or menu, or a click that isn't
+                    # words at all: not someone answering. Wait for real first
+                    # words, or introduce into silence.
+                    log.info("call %s: %s after answer, not a person; waiting", call.id,
+                             f"tone {text!r}" if text else "noise")
                     answered = False
                     first = await self._first_words()
                     if first is HANGUP:
@@ -594,8 +636,6 @@ class CallSession:
                     await self._say(opening_lines(call.brief.opening_line)[asks_how_we_are(text)])
                     if await self._follow_intro():
                         return
-                    continue
-                if not text:
                     continue
                 await self._recording_notice(text)
                 self._heard_since_we_spoke.append(text)  # a hold message may loop from here
@@ -901,9 +941,11 @@ class CallSession:
             if not done and not self._frames and not self._streamed_at:
                 options = [f for f in FILLERS if f != self._last_filler]
                 self._last_filler = random.choice(options)
-                self._play(await self.speech.synthesize(self._last_filler))
-                log.info("call %s: filler %r while thinking", self.call.id, self._last_filler)
-                filled = True
+                pcm = await self._tts(self._last_filler)
+                if not task.done() and not self._streamed_at:  # still nothing to say
+                    self._play(pcm, filler=True)
+                    log.info("call %s: filler %r while thinking", self.call.id, self._last_filler)
+                    filled = True
         self._filled_last_turn = filled
         try:
             return await task
@@ -940,7 +982,7 @@ class CallSession:
                 if self._streamed_at:
                     break  # part of a reply is already out: don't start a second one
                 if attempt == 0:
-                    self._play(await self.speech.synthesize(BEAR_WITH_ME))
+                    self._play(await self._tts(BEAR_WITH_ME))
         if turn is None:
             # Pre-rendered: it plays even with the model gone. No more attempts on this call.
             call.dialog_down = True
@@ -1059,7 +1101,9 @@ class CallSession:
         """We've said our opening line. A hold after that is them checking
         something, and whoever comes back gets a real reply, not the intro again."""
         opening = self.call.brief.opening_line
-        return any(who == "agent" and text.endswith(opening) for who, text in self.call.transcript)
+        # An interruption tags the line; we still said who we are.
+        return any(who == "agent" and text.removesuffix(" [interrupted]").endswith(opening)
+                   for who, text in self.call.transcript)
 
     def _first_since_press(self, heard: int) -> bool:
         """What we just heard (the last `heard` callee lines) is the first thing
@@ -1106,7 +1150,7 @@ class CallSession:
         began = rest[0] if rest else time.time() - len(pcm) / (2 * self.rate)
         if len(pcm) >= self.frame_bytes * MIN_UTTERANCE_MS // ass.FRAME_MS:
             t0 = time.monotonic()
-            text = await self.speech.transcribe(pcm)
+            text = await self._stt(pcm)
             # Timing at INFO; what was said only at DEBUG (LOG_LEVEL=DEBUG), so routine
             # logs don't collect names, numbers or booking references. The call
             # database has the transcript anyway.
@@ -1160,9 +1204,12 @@ class CallSession:
         self.call.add_transcript("agent", text)
         self._speaking_line = text
         self._last_said_at = time.monotonic()
+        self._cut = False
         for i, sentence in enumerate(split_sentences(text)):
             t0 = time.monotonic()
-            pcm = await self.speech.synthesize(sentence)
+            pcm = await self._tts(sentence)
+            if self._cut:
+                break  # they interrupted while this was rendering
             log.info("call %s: TTS %.0f ms (%d chars)", self.call.id, (time.monotonic() - t0) * 1000, len(sentence))
             log.debug("call %s: saying %r", self.call.id, sentence)
             if i == 0:
@@ -1178,10 +1225,13 @@ class CallSession:
         if first:
             self._streamed_at = time.monotonic()  # no filler from now on
         t0 = time.monotonic()
-        pcm = await self.speech.synthesize(sentence)
+        pcm = await self._tts(sentence)
         log.info("call %s: TTS %.0f ms (%d chars)", self.call.id, (time.monotonic() - t0) * 1000, len(sentence))
         log.debug("call %s: saying %r", self.call.id, sentence)
+        if not first and self._cut:
+            return  # they interrupted this reply: the rest stays unsaid and unwritten
         if first:
+            self._cut = False
             self._heard_since_we_spoke = []
             self.call.add_transcript("agent", sentence)
             self._speaking_line = sentence
@@ -1195,9 +1245,10 @@ class CallSession:
         self._frames.extend(ass.split_frames(pcm, self.rate))
         self._drained.clear()
 
-    def _play(self, pcm: bytes, interruptible: bool = True) -> None:
+    def _play(self, pcm: bytes, interruptible: bool = True, filler: bool = False) -> None:
         # Keypad tones must play out even while a phone menu keeps talking.
         self._interruptible = interruptible
+        self._filler = filler
         self._paused_at = None
         self._frames.extend(ass.split_frames(pcm, self.rate))
         self._drained.clear()
@@ -1277,8 +1328,14 @@ class CallSession:
         if self.barge_in and self._interruptible and self._frames and self._paused_at is None:
             self._paused_at = time.monotonic()
         pending = self._pending_turn
-        if pending is not None and not pending.done() and not self._streamed_at and not self._frames:
-            # Still working out our reply and nothing played yet: they're carrying on.
+        only_filler = bool(self._frames) and self._filler
+        if pending is not None and not pending.done() and not self._streamed_at and (not self._frames or only_filler):
+            # Still working out our reply and nothing of it played yet (at most a
+            # "let me think"): they're carrying on. Drop the filler and the reply,
+            # or it would start up over them.
+            if only_filler:
+                self._frames.clear()
+                self._paused_at = None
             self._superseded = True
             pending.cancel()
 
@@ -1288,6 +1345,7 @@ class CallSession:
         if self._frames:
             self._frames.clear()
             self.call.mark_interrupted()
+            self._cut = True  # sentences of this line still being rendered stay unsaid
 
     async def _send_loop(self) -> None:
         """Stream 20 ms frames continuously: our speech, or silence between

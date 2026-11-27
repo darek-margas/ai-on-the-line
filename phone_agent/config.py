@@ -9,6 +9,17 @@ from dataclasses import dataclass, field
 from .dialing import TYPES, DialRules
 
 
+def _call_hours(value: str) -> tuple[str, str]:
+    """"8:30-18:30" -> ("08:30", "18:30"): the hours are compared as text."""
+    match = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*", value)
+    if not match:
+        raise ValueError(f"CALL_HOURS must look like 08:30-18:30, not {value!r}")
+    h1, m1, h2, m2 = map(int, match.groups())
+    if h1 > 23 or h2 > 24 or m1 > 59 or m2 > 59 or (h2 == 24 and m2):
+        raise ValueError(f"CALL_HOURS has a time that doesn't exist: {value!r}")
+    return f"{h1:02d}:{m1:02d}", f"{h2:02d}:{m2:02d}"
+
+
 def _env(name: str, default: str | None = None) -> str:
     value = os.environ.get(name, default)
     if value is None:
@@ -116,7 +127,7 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        start, _, end = _env("CALL_HOURS", "08:30-18:30").partition("-")
+        start, end = _call_hours(_env("CALL_HOURS", "08:30-18:30"))
         return cls(
             data_dir=_env("DATA_DIR", "./data"),
             http_host=_env("HTTP_HOST", "0.0.0.0"),

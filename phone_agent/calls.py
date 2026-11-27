@@ -4,7 +4,6 @@
 
 import asyncio
 import logging
-import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -18,7 +17,7 @@ from .ari import Ari
 from .config import Config
 from .db import Database
 from .dialog import Brief, Dialog
-from .dialing import dial_digits, normalize_number
+from .dialing import is_extension, normalize_number
 from .inbound import PROFILES
 from .notify import email_call, wants_email
 from .session import (BEAR_WITH_ME, FILLERS, RECORDING_NOTICE, CallSession, opening_lines, split_sentences,
@@ -171,7 +170,7 @@ class CallManager:
         if mode == "all":
             return None
         rules = self.cfg.dial_rules
-        if rules.extensions and re.fullmatch(rules.extensions, number):
+        if is_extension(number, rules):
             return "internal extension"
         listed = set()
         for entry in self.cfg.approved_numbers:
@@ -221,8 +220,7 @@ class CallManager:
 
     def hours_error(self, phone: str, zone: str, ignore: bool, at: float | None = None) -> str | None:
         """Why the call can't go out at `at` (default now) under CALL_HOURS, or None."""
-        extensions = self.cfg.dial_rules.extensions
-        if ignore or (extensions and re.fullmatch(extensions, dial_digits(phone))):
+        if ignore or is_extension(phone, self.cfg.dial_rules):
             return None  # extensions ring any time
         tz = ZoneInfo(zone)
         local = datetime.fromtimestamp(at or time.time(), tz)
