@@ -24,7 +24,7 @@ Everything is in `.env`; [.env.example](../.env.example) lists every setting wit
 - `AGENT_NAME`: Jenny by default, after the default voice. The agent gives it only when someone asks its name; the introduction stays "I'm Alex's assistant". Asked whether it's an AI, it still says so. Leave it empty and it answers the name question with "I'm Alex's assistant".
 - `SCREENER_RECORDING_NOTICE`: on by default. The screener's greeting tells callers the call is recorded, which many places require.
 - `OWNER_BIO`: optional. What the call screener may say about you. Leave it empty and it won't make small talk about you.
-- `TIMEZONE` and `CALL_HOURS`: outside numbers are only called within these hours, in this timezone. A single call can override it; extensions are always allowed.
+- `TIMEZONE` and `CALL_HOURS`: outside numbers are only called within these hours, in this timezone. Write the hours as `08:30-18:30`. A window that ends before it starts, like `22:00-02:00`, runs past midnight. The agent won't start with hours it can't read. A single call can override the hours; extensions are always allowed.
 - `ARI_*`, `AMI_*`, `AUDIOSOCKET_ADVERTISE`, `DIAL_ENDPOINT`: the Asterisk connection, see the FreePBX guide.
 - `DIAL_*`: which numbers may be dialled, see [dialling.md](dialling.md).
 - `API_TOKEN`: required. `openssl rand -hex 32` makes one.
@@ -51,6 +51,8 @@ docker compose exec -T phone-agent python - < tools/stt_bench.py
 The compose file brings its own Piper with the Jenny voice, pinned to one image version, so calls don't start sounding different after an update. It's slowed down a little (`PIPER_LENGTH_SCALE=1.12`), which is easier to follow on a phone line. You can point `WYOMING_TTS` at Home Assistant's Piper instead, but then the agent speaks at whatever speed Home Assistant uses. With a different voice, set `CREDIT_VOICE` to it, or leave it empty.
 
 Names Piper says wrongly can be respelled: `TTS_PRONOUNCE=Siobhan=Shivawn,Nguyen=Win`.
+
+A speech server that stops answering doesn't hold a call. Before dialling, Whisper and Piper each get 30 seconds, because a cold Whisper can take 20. During a call, recognition gets 12 seconds and speech 10. Past that the agent says its pre-rendered goodbye, the one it uses when the model fails, and ends the call as `technical_failure`. The goodbye was rendered before the call, so it plays even with Piper gone.
 
 ## The model
 
@@ -113,7 +115,7 @@ A person has to approve each call somewhere, because transcripts carry callers' 
 
 ### Approving calls
 
-With `APPROVAL_TOKEN` set, `place_call` still returns at once, but a call to a number that isn't approved yet gets the status `awaiting_approval` and doesn't dial. Claude is told it can't approve it and gives you the link. The call page shows the number, the time, the opening line, the questions and what it may tell them, with Approve and Reject buttons. The call list shows a line for every call waiting.
+With `APPROVAL_TOKEN` set, `place_call` still returns at once, but a call to a number that isn't approved yet gets the status `awaiting_approval` and doesn't dial. Claude is told it can't approve it and gives you the link. The call page shows the whole brief, with Approve and Reject buttons: the number and the time, the goal, the opening line, each question, what the agent may tell them, what it must not do, and the context. It also says when a call has a longer time limit than usual, ignores calling hours, or has its hours checked in another timezone. Read the "must not" list like the rest: it goes into the agent's instructions word for word. The call list shows a line for every call waiting.
 
 <img src="images/call-approval.png" alt="A call page waiting for approval: a sales call to a carrier, scheduled for 09:15, showing the opening line, the four questions, what the agent may tell them and the context, with Approve and Reject buttons and a ticked 'Approve this number for later calls too'." width="620">
 
@@ -149,13 +151,30 @@ With `RECORDINGS_DIR` set, the recording is attached as a WAV once the PBX has f
 
 `EMAIL_CALLS=inbound` (the default) covers calls the agent answered. `all` adds outbound call reports. Mail goes out as plain SMTP with no login (`SMTP_PORT`, default 25), meant for a relay on your network. `EMAIL_FROM` defaults to `EMAIL_TO`. A mail failure is logged and never affects the call.
 
+## How a call ends
+
+`get_call` and the call page give every call a status, and a finished call an outcome.
+
+| Status | What happened |
+| --- | --- |
+| `finished` | Someone, or something, was on the line. The outcome says how it went: `completed`, `declined`, `hung_up`, `time_limit`, `technical_failure` and so on. |
+| `not_answered` | It rang out or was busy. |
+| `failed` | It never got as far as a conversation, or broke: outside calling hours when it was due, the model unavailable before dialling, a PBX error, the container restarted mid-call. The call's error says which. |
+| `cancelled` | Nobody was reached and that was intended: you rejected it, nobody approved it in time (`expired`), or you stopped it with `hang_up` or the page before anyone answered. |
+
+Stopping a call that is already talking ends it as `finished` with outcome `hung_up_by_owner`.
+
+When Whisper, Piper or the model fails during a call, the other side hears a short apology before the line closes, and the outcome is `technical_failure`.
+
+Only live calls are kept in memory. A call that has ended is read from the database, so the call list survives restarts and doesn't grow the container's memory.
+
 ## Updating
 
 ```bash
 docker compose pull && docker compose up -d
 ```
 
-The call database gets new columns on start when a release needs them. Nothing has to be migrated by hand. Read the release notes for changed settings: 2026.11.1.1, for example, needed `DIAL_LOCAL_AREA_CODE` for 8-digit local numbers.
+The call database gets new columns on start when a release needs them. Nothing has to be migrated by hand. Read the release notes for changed settings: 2026.11.1.1, for example, needed `DIAL_LOCAL_AREA_CODE` for 8-digit local numbers, and 2026.11.2.27 tightened the dialling rules and stops at start-up on a `CALL_HOURS` it can't read.
 
 A call in progress is cut off by a restart and marked failed. Check `list_calls` first.
 

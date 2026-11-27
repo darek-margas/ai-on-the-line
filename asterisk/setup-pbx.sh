@@ -11,6 +11,11 @@
 #   ./setup-pbx.sh --check                            only check, change nothing
 #   ./setup-pbx.sh --uninstall                        remove what it added
 #
+# Each run sets the PBX up as its options say, and starts by listing what it is
+# about to do. So a run without --screener REMOVES a screener set up earlier:
+# that is how you take the screener out and keep outgoing calls. Add --dry-run
+# to read the plan and the files it would write without changing anything.
+#
 # What it changes, all in its own files so nothing of yours is edited:
 #   /etc/asterisk/ai-on-the-line-*.conf, each pulled in with one #include line
 #   (in the *_custom.conf files on FreePBX, the main .conf files otherwise);
@@ -19,18 +24,20 @@
 #   settings and a firewall trust entry for the agent's host.
 # At the end it prints the lines for the agent's .env and saves them in
 # /root/ai-on-the-line.env (readable by root only). Running it again keeps the
-# passwords, so the agent's .env stays valid.
+# passwords, so the agent's .env stays valid, and remembers the agent's host,
+# the token and the --fallback from the last run unless you give new ones.
 
 set -u
-VERSION=1
-ETC=/etc/asterisk
+VERSION=2
+# The three paths can be pointed elsewhere to try the script out (SETUP_ETC, ...).
+ETC=${SETUP_ETC:-/etc/asterisk}
 NAME=ai-on-the-line
-SAVED=/root/ai-on-the-line.env
-FINISH=/usr/local/bin/agent-recording-finish
+SAVED=${SETUP_SAVED:-/root/ai-on-the-line.env}
+FINISH=${SETUP_FINISH:-/usr/local/bin/agent-recording-finish}
 RAW=https://raw.githubusercontent.com/darek-margas/ai-on-the-line/main/asterisk
 
 AGENT_HOST="" AGENT_PORT=8090 SOCKET_PORT=9092 TOKEN="" SCREENER=0 DIAL_CONTEXT=""
-FALLBACK="" MODE=install DRY=0 NFS=0
+FALLBACK="" FALLBACK_GIVEN=0 MODE=install DRY=0 NFS=0
 
 usage() { sed -n '4,22p' "$0" | sed 's/^# \{0,1\}//'; cat <<'EOF'
 
@@ -41,10 +48,14 @@ Options:
   --dial-context CTX    the context outgoing calls go through (default from-internal
                         on FreePBX; required on plain Asterisk)
   --screener            also set up incoming calls: test extension 7990 and the
-                        [ai-on-the-line-screen] context to use as a destination
-  --token TOKEN         the agent's API_TOKEN (needed with --screener)
+                        [ai-on-the-line-screen] context to use as a destination.
+                        A run without it removes a screener set up earlier.
+  --token TOKEN         the agent's API_TOKEN (needed with --screener the first
+                        time; remembered after that)
   --fallback CTX,EXT,PRI  where screened callers go if the agent can't answer,
-                        e.g. ext-local,vmu101,1 for 101's voicemail
+                        e.g. ext-local,vmu101,1 for 101's voicemail. Remembered
+                        for later runs; "--fallback none" clears it, and callers
+                        then hear a short apology instead.
   --nfs                 share the recordings folder read-only with the agent's host
   --check               only check the setup
   --uninstall           remove everything this script added
@@ -54,13 +65,17 @@ EOF
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --agent-host|--agent-port|--socket-port|--dial-context|--token|--fallback)
+            [ $# -ge 2 ] || { echo "$1 needs a value (see --help)" >&2; exit 2; } ;;
+    esac
+    case "$1" in
         --agent-host) AGENT_HOST="$2"; shift ;;
         --agent-port) AGENT_PORT="$2"; shift ;;
         --socket-port) SOCKET_PORT="$2"; shift ;;
         --dial-context) DIAL_CONTEXT="$2"; shift ;;
         --screener) SCREENER=1 ;;
         --token) TOKEN="$2"; shift ;;
-        --fallback) FALLBACK="$2"; shift ;;
+        --fallback) FALLBACK="$2"; FALLBACK_GIVEN=1; shift ;;
         --nfs) NFS=1 ;;
         --check) MODE=check ;;
         --uninstall) MODE=uninstall ;;
@@ -233,12 +248,15 @@ check() {
 # --- uninstall -----------------------------------------------------------------
 
 if [ "$MODE" = uninstall ]; then
-    step "Removing AI on the Line from this PBX"
+    step "Removing AI on the Line from this PBX$([ "$DRY" = 1 ] && echo ' (dry run)')"
+    echo "  This removes the dialplan contexts, the screener, test extension 7990 and the"
+    echo "  ARI and AMI users called $NAME, then reloads. Outgoing and screened calls stop."
     remove_include "$INC_EXT" "$F_EXT"; remove_include "$INC_EXT" "$F_TEST"
     remove_include "$INC_ARI" "$F_ARI"; remove_include "$INC_AMI" "$F_AMI"
     for f in "$F_EXT" "$F_TEST" "$F_ARI" "$F_AMI"; do [ -f "$f" ] && run rm -f "$f" && ok "removed $f"; done
     if [ "$FREEPBX" = 1 ]; then run fwconsole reload >/dev/null; else run asterisk -rx "core reload" >/dev/null; fi
     echo; echo "Left in place: $FINISH, $SAVED, recordings, and any NFS export. The HTTP/ARI settings are unchanged."
+    echo "If an inbound route or Custom Destination points at ai-on-the-line-screen,s,1, point it somewhere else: those calls now fail."
     exit 0
 fi
 
@@ -252,10 +270,25 @@ fi
 
 # --- install -------------------------------------------------------------------
 
+HOST_FROM="--agent-host"
+if [ -z "$AGENT_HOST" ]; then AGENT_HOST=$(saved AGENT_HOST); HOST_FROM="the last run"; fi
 [ -n "$AGENT_HOST" ] || { echo "--agent-host is required (the Docker host running the agent). See --help." >&2; exit 2; }
+[ -n "$DIAL_CONTEXT" ] || DIAL_CONTEXT=$(saved DIAL_CONTEXT)
 [ -n "$DIAL_CONTEXT" ] || { echo "On plain Asterisk, give --dial-context: the context your phones dial out through." >&2; exit 2; }
-if [ "$SCREENER" = 1 ] && [ -z "$TOKEN" ]; then TOKEN=$(saved PHONE_AGENT_TOKEN); fi
+TOKEN_FROM="--token"
+if [ "$SCREENER" = 1 ] && [ -z "$TOKEN" ]; then TOKEN=$(saved PHONE_AGENT_TOKEN); TOKEN_FROM="the last run"; fi
 [ "$SCREENER" = 0 ] || [ -n "$TOKEN" ] || { echo "--screener needs --token (the agent's API_TOKEN)." >&2; exit 2; }
+FALLBACK_FROM="--fallback"
+if [ "$SCREENER" = 1 ]; then
+    if [ "$FALLBACK_GIVEN" = 0 ]; then FALLBACK=$(saved AGENT_FALLBACK); FALLBACK_FROM="the last run"; fi
+    [ "$FALLBACK" = none ] && FALLBACK=""
+    if [ -n "$FALLBACK" ] && ! [[ "$FALLBACK" =~ ^[A-Za-z0-9_-]+,[A-Za-z0-9_*#-]+,[A-Za-z0-9_]+$ ]]; then
+        echo "--fallback must be context,extension,priority (e.g. ext-local,vmu101,1), not '$FALLBACK'." >&2; exit 2
+    fi
+fi
+# A screener from an earlier run (also one written by an older version of this script).
+HAD_SCREENER=0
+grep -q '^\[phone-agent-inbound\]' "$F_EXT" 2>/dev/null && HAD_SCREENER=1
 
 for ctx in phone-agent phone-agent-inbound; do
     other=$(context_elsewhere "$ctx")
@@ -275,6 +308,26 @@ PBX_ADDR=$(ip route get "$AGENT_IP" 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*
 [ -n "$PBX_ADDR" ] || PBX_ADDR=$(hostname -I | awk '{print $1}')
 
 echo "AI on the Line PBX setup v$VERSION: Asterisk $AST_VERSION$([ "$FREEPBX" = 1 ] && echo " with FreePBX"), agent at $AGENT_HOST ($AGENT_IP)$([ "$DRY" = 1 ] && echo ', dry run')"
+
+step "This run will$([ "$DRY" = 1 ] && echo ' (dry run: it only shows it)')"
+plan() { printf '  - %s\n' "$*"; }
+plan "use the agent at $AGENT_HOST, web port $AGENT_PORT, AudioSocket port $SOCKET_PORT (host from $HOST_FROM)"
+plan "send outgoing calls through [$DIAL_CONTEXT]"
+if [ -n "$(saved ARI_PASSWORD)" ]; then plan "keep the ARI and AMI passwords from the last run, so the agent's .env stays valid"
+else plan "create the ARI and AMI users '$NAME' with new passwords, for the agent's .env"; fi
+if [ "$SCREENER" = 1 ]; then
+    plan "$([ "$HAD_SCREENER" = 1 ] && echo "rewrite" || echo "add") the call screener: [phone-agent-inbound], [ai-on-the-line-screen] and test extension 7990"
+    plan "register incoming calls with the agent using the API token from $TOKEN_FROM"
+    if [ -n "$FALLBACK" ]; then plan "send callers to $FALLBACK when the agent can't answer (from $FALLBACK_FROM)"
+    else plan "play a short apology when the agent can't answer: no fallback is set (--fallback ext-local,vmu101,1 would use 101's voicemail)"; fi
+elif [ "$HAD_SCREENER" = 1 ]; then
+    plan "REMOVE the call screener set up earlier, because --screener wasn't given: [phone-agent-inbound], [ai-on-the-line-screen] and test extension 7990. Add --screener to keep it."
+else
+    plan "leave incoming calls alone (no --screener)"
+fi
+if [ "$NFS" = 1 ]; then plan "share /var/spool/asterisk/monitor read-only with $AGENT_IP over NFS"
+else plan "leave NFS as it is (no --nfs)"; fi
+plan "reload $([ "$FREEPBX" = 1 ] && echo "FreePBX (fwconsole reload)" || echo "ARI, AMI and the dialplan")"
 
 step "Modules"
 for m in res_audiosocket chan_audiosocket; do
@@ -407,6 +460,17 @@ if [ "$SCREENER" = 1 ]; then
     else
         warn "add 'include => ai-on-the-line-test' to the context your phones use, to reach test extension 7990"
     fi
+else
+    # No screener in this run: nothing may be left pointing at contexts that are gone.
+    if [ -f "$F_TEST" ] || grep -q "$(basename "$F_TEST")" "$INC_EXT" 2>/dev/null; then
+        remove_include "$INC_EXT" "$F_TEST"
+        [ -f "$F_TEST" ] && run rm -f "$F_TEST" && ok "removed $F_TEST (test extension 7990)"
+    fi
+    if [ "$HAD_SCREENER" = 1 ]; then
+        [ "$DRY" = 1 ] && echo "  would remove the call screener" || ok "removed the call screener"
+        warn "if an inbound route or Custom Destination points at ai-on-the-line-screen,s,1, point it somewhere else: those calls now fail"
+        [ "$FREEPBX" = 1 ] || warn "remove 'include => ai-on-the-line-test' from your phones' context if you added it"
+    fi
 fi
 
 step "Recording finisher"
@@ -442,6 +506,9 @@ fi
 
 if [ "$DRY" = 0 ]; then
     umask 077
+    # A screener taken out keeps its token and fallback here, for when it comes back.
+    KEPT=""
+    if [ "$SCREENER" = 0 ]; then KEPT=$(grep -E '^(PHONE_AGENT_TOKEN|AGENT_FALLBACK)=' "$SAVED" 2>/dev/null); fi
     cat > "$SAVED" <<EOF
 # AI on the Line, written by setup-pbx.sh on $(date '+%Y-%m-%d %H:%M'). Copy the
 # lines below into the agent's .env. The rest is for the next run of the script.
@@ -459,6 +526,8 @@ $([ "$NFS" = 1 ] && echo "RECORDINGS_DIR=/recordings")
 AGENT_HOST=$AGENT_HOST
 DIAL_CONTEXT=$DIAL_CONTEXT
 $([ "$SCREENER" = 1 ] && echo "PHONE_AGENT_TOKEN=$TOKEN")
+$([ "$SCREENER" = 1 ] && echo "AGENT_FALLBACK=$FALLBACK")
+$KEPT
 EOF
 fi
 
@@ -481,5 +550,7 @@ if [ "$DRY" = 0 ]; then
         echo "  volumes: - /mnt/freepbx-monitor:/recordings:ro"
     fi
     [ "$SCREENER" = 1 ] && [ "$FREEPBX" = 1 ] && echo && echo "Screener: dial 7990 to try it. To route callers to it, add Admin > Custom Destinations > ai-on-the-line-screen,s,1."
+    [ "$SCREENER" = 1 ] && echo "When the agent can't answer, callers $([ -n "$FALLBACK" ] && echo "go to $FALLBACK" || echo "hear a short apology (no --fallback)")."
+    [ "$SCREENER" = 0 ] && [ "$HAD_SCREENER" = 1 ] && echo && echo "The call screener was removed. Run again with --screener to put it back; the token and fallback are remembered."
 fi
 exit $((FAILURES > 0))

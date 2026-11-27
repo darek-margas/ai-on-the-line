@@ -15,6 +15,8 @@ chmod +x setup-pbx.sh
 ./setup-pbx.sh --agent-host 192.168.1.20
 ```
 
+Every run starts with a list headed "This run will": which host it uses, whether the passwords are new or kept, what happens to the screener, where callers go when the agent can't answer, and what it reloads. `--dry-run` shows that list and the files it would write, and changes nothing.
+
 It prints the lines for the agent's `.env` (ARI and AMI users with generated passwords, `DIAL_ENDPOINT`, `AUDIOSOCKET_ADVERTISE`) and saves them in `/root/ai-on-the-line.env`. Then it checks everything it set up and says what's missing.
 
 What it changes:
@@ -26,13 +28,15 @@ What it changes:
 
 Options worth knowing:
 
-- `--screener --token <API_TOKEN>` adds incoming calls: test extension 7990, and a context `ai-on-the-line-screen,s,1` to add under Admin → Custom Destinations and pick in an inbound route. `--fallback ext-local,vmu101,1` sends callers to 101's voicemail when the agent can't answer.
+- `--screener --token <API_TOKEN>` adds incoming calls: test extension 7990, and a context `ai-on-the-line-screen,s,1` to add under Admin → Custom Destinations and pick in an inbound route. The token is needed the first time and remembered after that.
+- `--fallback ext-local,vmu101,1` sends callers to 101's voicemail when the agent can't answer. Without a fallback they hear a short apology. It's remembered for later runs; `--fallback none` clears it.
+- A run without `--screener` removes a screener set up earlier and keeps outgoing calls. The script says so in its list before it does it, and reminds you to repoint any inbound route or Custom Destination that used the screener. The token and fallback stay saved, so `--screener` on a later run puts it back as it was.
 - `--nfs` shares the recordings folder read-only with the agent's host and prints the line for that host's `/etc/fstab`.
 - `--dial-context` is the context outgoing calls go through. FreePBX uses `from-internal`; on plain Asterisk you have to give it.
 - `--check` changes nothing and reports what works: modules, HTTP, the users, the dialplan, recordings, and whether the agent's ports answer. Run it after an upgrade, or when calls stop working.
-- `--uninstall` removes its files and users again.
+- `--uninstall` removes its files and users again: outgoing calls and the screener both stop.
 
-Running it again keeps the passwords, so the agent's `.env` stays valid. If the PBX already has a `[phone-agent]` context written by hand, as mine does from before the script existed, it stops instead of adding a second one.
+Each run sets the PBX up as its options say. Running it again keeps the passwords, so the agent's `.env` stays valid, and remembers the agent's host from the last run, so `./setup-pbx.sh --screener` is enough to repeat a setup. If the PBX already has a `[phone-agent]` context written by hand, as mine does from before the script existed, it stops instead of adding a second one.
 
 On plain Asterisk it won't edit `http.conf` and the `[general]` section of `ari.conf`; it tells you if the HTTP server or ARI is off.
 
@@ -166,6 +170,10 @@ exten => s,1,Set(AGENT_UUID=${FILTER(0-9a-f-,${SHELL(cat /proc/sys/kernel/random
  same => n,Playback(im-sorry&cannot-complete-temp-error)
  same => n,Hangup()
 ```
+
+The token is a form field inside the `CURL` call on purpose. Asterisk logs every dialplan step with its values filled in, so a step of its own that sets an `Authorization` header writes the token to `/var/log/asterisk/full` on each call. A function call inside `Set()` is logged only by its result (`AGENT_REPLY=ok`). The agent accepts the token as a header too, so a dialplan written the older way keeps working.
+
+The agent answers `ok`, or says why not: `busy` when it's already on a call, `wrong token`, or what was wrong with the request. Anything but `ok` sends the caller to `AGENT_FALLBACK`.
 
 Registration takes about a second. The agent uses that time to warm up the model and speech recognition, and the greeting is pre-rendered, so the caller hears "Hi, you've reached Darek's assistant" half a second after the call connects.
 
@@ -334,6 +342,8 @@ If calls originate but the far end hears nothing, `AUDIOSOCKET_ADVERTISE` is usu
 If call pages have no player, check `ls /mnt/freepbx-monitor` on the Docker host. An empty folder usually means the PBX firewall blocks port 2049 or the export lists a different address (`exportfs -v` on the PBX).
 
 If keypresses don't work, check the AMI user's `permit` line and that `webenabled = yes`. `asterisk -rx "manager show users"` should list it.
+
+If screened callers always land on the fallback, look in `/var/log/asterisk/full` for `did not take the call:`. The reply after it is the agent's: `wrong token` means `PHONE_AGENT_TOKEN` on the PBX doesn't match the agent's `API_TOKEN`, `busy` means it was on another call, and an empty reply means the PBX couldn't reach the agent's web port.
 
 Calling your own trunk number from the PBX returns `486 Busy` on Internode rather than ringing back in. Test inbound from a mobile.
 
