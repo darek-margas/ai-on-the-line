@@ -435,6 +435,7 @@ class CallSession:
         self._interruptible = True
         self._speaking_line = ""  # what we're saying now (for the echo check)
         self._overlapped_line: str | None = None
+        self._speech_began = 0.0  # time.time() the current utterance started
         self._heard_over_us = False
         self._heard_before_us = False
         self._last_filler = ""
@@ -1099,10 +1100,10 @@ class CallSession:
         return "completed" if all(q in self.call.answers for q in brief.questions) else "hung_up"
 
     async def _heard(self, item: tuple[bytes, str | None]) -> str:
-        pcm, overlapped_line = item
+        pcm, overlapped_line, *rest = item
         text = ""
-        # Roughly when they started speaking: the utterance ends about now.
-        began = time.time() - len(pcm) / (2 * self.rate)
+        # When they started speaking, from the VAD; else roughly, from its length.
+        began = rest[0] if rest else time.time() - len(pcm) / (2 * self.rate)
         if len(pcm) >= self.frame_bytes * MIN_UTTERANCE_MS // ass.FRAME_MS:
             t0 = time.monotonic()
             text = await self.speech.transcribe(pcm)
@@ -1244,9 +1245,11 @@ class CallSession:
                 # as overlap when a good part of our line was still to come.
                 still_to_say = len(self._frames) * ass.FRAME_MS / 1000
                 self._overlapped_line = self._speaking_line if still_to_say > OVERLAP_MIN_SECONDS else None
+                # Speech is confirmed after start_frames of voice: it began that long ago.
+                self._speech_began = time.time() - self.segmenter.start_frames * ass.FRAME_MS / 1000
                 self._on_speech_start()
             else:
-                self.utterances.put_nowait((utterance, self._overlapped_line))
+                self.utterances.put_nowait((utterance, self._overlapped_line, self._speech_began))
 
     async def _gap_filler(self) -> None:
         """Asterisk sends no frames at all while the far side is silent on some
