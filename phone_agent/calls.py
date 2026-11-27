@@ -268,6 +268,8 @@ class CallManager:
         active = sum(c.brief.direction == "inbound" and c.status not in FINAL_STATUSES for c in self.calls.values())
         if active >= self.cfg.max_inbound_calls or call_id in self.calls:
             raise RuntimeError("busy")
+        if self.db.get_call(call_id) is not None:
+            raise ValueError("call id already used")  # never replace an ended call's record
         brief = PROFILES[profile](
             self.cfg.owner_name, caller, diverted_from, bio=self.cfg.owner_bio, pronouns=self.cfg.owner_pronouns,
             recording_notice=self.cfg.screener_recording_notice,
@@ -381,7 +383,8 @@ class CallManager:
                     log.warning("call %s: couldn't hang up its channel after the failure", call.id, exc_info=True)
         finally:
             if call.status not in FINAL_STATUSES:
-                call.status = "finished"
+                # Stopped by the owner before anyone was on the line: no conversation.
+                call.status = "cancelled" if call.cancel_requested and not call.connected.is_set() else "finished"
             call.ended = time.time()
             call.changed()
             call.done.set()
@@ -479,7 +482,8 @@ class CallManager:
         if answered:
             await call.conversation_over.wait()
         else:
-            call.status = "not_answered"
+            # The owner hanging up while it rings also makes the channel vanish.
+            call.status = "cancelled" if call.cancel_requested else "not_answered"
             call.set_outcome("not_answered")
             await self.ari.hangup(call.channel_id)
 

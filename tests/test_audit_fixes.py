@@ -237,3 +237,132 @@ def test_call_hours_are_checked_and_padded():
     for bad in ["08:30", "8.30-18.30", "25:00-26:00", "08:61-09:00", "nine-five"]:
         with pytest.raises(ValueError):
             _call_hours(bad)
+
+
+# Second batch: where heard lines stand, the PBX token, approval page, statuses
+
+
+def test_first_since_press_ignores_the_menu_tail_and_later_lines(tmp_path):
+    session = make_session(tmp_path)
+    session._since_press, session._last_heard = 0, ""  # we just pressed a key
+    session._before = [True]  # the menu's last sentence, said before the press
+    assert session._where_heard(["For sales, press one."]) == (True, False, False)
+    session._before = [False]
+    assert session._where_heard(["Sales, Jordan speaking."]) == (False, True, False)
+    session._before = [False]  # whatever comes next is no longer the first thing
+    assert session._where_heard(["It'll arrive in about three weeks."])[1] is False
+
+
+async def test_after_tones_follows_what_was_heard_not_the_transcript_tail(tmp_path):
+    session = make_session(tmp_path)
+    session._before = [False]
+    assert session._where_heard(["Beep. Beep."])[2] is False
+    session._before = [False]
+    assert session._where_heard(["Hi, we're with Riverside."])[2] is True
+    await session._say("Hello there.")  # we spoke: tones before that no longer count
+    session._before = [False]
+    assert session._where_heard(["Hi again."]) == (False, False, False)
+
+
+def web_client(tmp_path, **changes):
+    from starlette.testclient import TestClient
+
+    from phone_agent.auth import TokenAuth
+    from phone_agent.server import build_app
+    from test_approval import manager_for
+
+    manager, _ = manager_for(tmp_path, api_token="api", approval_token="approve-me", **changes)
+    mcp = build_app(manager.cfg, manager, manager.db, None, None, None)
+    return manager, TestClient(TokenAuth(mcp.streamable_http_app(), "api", "approve-me"), follow_redirects=False)
+
+
+def test_inbound_takes_its_token_in_the_form_body(tmp_path):
+    manager, client = web_client(tmp_path)
+    form = {"uuid": str(uuid.uuid4()), "caller": "0491570156"}
+    refused_reply = client.post("/inbound", data=form)
+    assert refused_reply.status_code == 401
+    # The dialplan compares the reply inside quotes: a quote in it breaks the comparison.
+    assert refused_reply.text == "wrong token" and '"' not in refused_reply.text
+    assert client.post("/inbound", data=form | {"token": "nope"}).status_code == 401
+    assert client.post("/inbound", data=form | {"token": "api"}).text == "ok"
+    # The header still works, and a body token opens nothing else.
+    other = {"uuid": str(uuid.uuid4()), "caller": "0491570156"}
+    assert client.post("/inbound", data=other, headers={"Authorization": "Bearer api"}).status_code in (200, 409)
+    assert client.post("/calls/x/approve", data={"token": "approve-me"}).status_code == 401
+
+
+def test_inbound_cannot_replace_an_ended_call(tmp_path):
+    manager, client = web_client(tmp_path)
+    old = str(uuid.uuid4())
+    manager.db.save_call({"id": old, "created": 0, "phone": "0255502222", "callee": "Riverside Motel", "brief": {},
+                          "status": "finished", "transcript": [["callee", "evidence"]]})
+    reply = client.post("/inbound", data={"uuid": old, "caller": "x"}, headers={"Authorization": "Bearer api"})
+    assert reply.status_code == 409
+    assert manager.db.get_call(old)["transcript"] == [["callee", "evidence"]]
+
+
+def test_login_only_redirects_into_this_site(tmp_path):
+    _, client = web_client(tmp_path)
+    for target in ["/%5Cevil.example/calls/x", "//evil.example", "https://evil.example", "/%0d%0aSet-Cookie:x=1"]:
+        reply = client.post(f"/login?next={target}", data={"token": "approve-me"})
+        assert reply.status_code == 303 and reply.headers["location"] == "/"
+    assert client.post("/login?next=/calls/abc", data={"token": "approve-me"}).headers["location"] == "/calls/abc"
+
+
+def test_approval_page_shows_the_whole_brief(tmp_path):
+    manager, client = web_client(tmp_path, call_approval="all")
+    brief = Brief(goal="Find the price", callee="Hotel", opening_line=OPENING, questions={"price": "price per night?"},
+                  must_not=["mention the gate code"], recording_notice=True)
+
+    async def place():
+        return manager.start_call("0255500000", brief, max_seconds=7200)
+
+    loop = asyncio.new_event_loop()
+    call = loop.run_until_complete(place())
+    page = client.get(f"/calls/{call.id}", headers={"Authorization": "Bearer approve-me"}).text
+    loop.close()
+    for shown in ["mention the gate code", "Time limit: 120 minutes", "Find the price", "<b>price:</b>",
+                  "Says the call is recorded"]:
+        assert shown in page
+
+
+async def test_a_call_stopped_before_anyone_answered_is_cancelled_not_finished(tmp_path):
+    warming = asyncio.Event()
+    release = asyncio.Event()
+
+    class Dialog(FakeDialog):
+        async def warm_up(self, brief=None):
+            warming.set()
+            await release.wait()
+
+    cfg = make_config(tmp_path)
+    manager = CallManager(cfg, Database(cfg.data_dir), FakeSpeech(), Dialog(), None)
+    call = manager.start_call("0255501234", BRIEF)
+    await asyncio.wait_for(warming.wait(), 5)
+    assert await manager.hang_up(call.id)
+    release.set()
+    await asyncio.wait_for(call.done.wait(), 5)
+    assert (call.status, call.outcome) == ("cancelled", "hung_up_by_owner")
+    assert manager.get(call.id)["status"] == "cancelled"
+
+
+async def test_stopping_the_conversation_takes_the_model_turn_with_it(tmp_path):
+    started = asyncio.Event()
+    finished = []
+
+    class Slow(FakeDialog):
+        async def next_turn(self, *args, **kwargs):
+            started.set()
+            await asyncio.sleep(1)
+            finished.append(True)  # would write to a call that is already wrapped up
+            return await super().next_turn(*args, **kwargs)
+
+    session = make_session(tmp_path, dialog=Slow())
+    await session._say("Do you have a room?")
+    turn = asyncio.create_task(session._turn_with_filler("They spoke.", they_spoke=False))
+    await asyncio.wait_for(started.wait(), 5)
+    turn.cancel()  # the watchdog stops the call
+    with pytest.raises(asyncio.CancelledError):
+        await turn
+    await asyncio.sleep(1.3)
+    assert finished == []

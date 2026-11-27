@@ -441,8 +441,10 @@ class CallSession:
         self._overlapped_line: str | None = None
         self._speech_began = 0.0  # time.time() the current utterance started
         self._heard_over_us = False
-        self._heard_before_us = False
         self._cut = False  # the line we're saying was interrupted
+        self._before: list[bool] = []  # per line heard this turn: said before our latest line began
+        self._since_press: int | None = None  # callee lines heard since our key press; None: we've spoken since
+        self._last_heard = ""  # their latest line, if we haven't spoken since
         self._filler = False  # what's playing is only a "let me think"
         self._last_filler = ""
         self._filled_last_turn = False
@@ -699,7 +701,7 @@ class CallSession:
                 silent_for = 0
                 self._greeting_pause = False  # the recording carried on
                 asked = self._just_asked()
-                self._heard_before_us = False
+                self._before = []
                 heard = [await self._heard(item)]
                 # They may have kept talking while we were busy; take it all in.
                 while not self.utterances.empty():
@@ -738,6 +740,7 @@ class CallSession:
                     continue
                 said = [h for h in heard if h]
                 joined = " ".join(said)
+                all_before, first_since_press, after_tones = self._where_heard(said)
                 await self._recording_notice(joined)
                 self._farewell_said = False  # they're still talking to us
                 if all(is_hold_sound(h) for h in said):
@@ -769,8 +772,8 @@ class CallSession:
                 # Anything else, even a short line after another recorded one ("Staff
                 # safety is our priority."), is the model's call: if it stays silent on
                 # a person, they say hello again.
-                if ((self._first_since_press(len(said))
-                     or (after_hold and (self._after_tones(len(said)) or PERSON_CUE.search(joined))))
+                if ((first_since_press
+                     or (after_hold and (after_tones or PERSON_CUE.search(joined))))
                         and answered_after_menu(joined)) or (
                         after_hold and person_after_hold(joined)):
                     # "Harvey Norman Moore Park" right after our key press, even garbled
@@ -809,6 +812,10 @@ class CallSession:
                     # "Okay, go ahead" right after our question: they're listening.
                     log.info("call %s: acknowledgement after our question, waiting for the answer", call.id)
                     continue
+                if all(THANKS_ONLY.match(h.strip()) for h in said) and all_before:
+                    # Said before our question began: not an answer to it, garbled or not.
+                    log.info("call %s: lone thank-you from before our line, ignored", call.id)
+                    continue
                 if all(THANKS_ONLY.match(h.strip()) for h in said) and time.monotonic() - self._last_said_at > LONE_THANKS_SECONDS:
                     # Whisper's favourite word for line noise, e.g. while they're off
                     # checking a shelf. Not worth a reply.
@@ -821,7 +828,7 @@ class CallSession:
                         "heard as a thank-you. It may be a garbled short answer: briefly ask them to "
                         "repeat it (e.g. 'Sorry, was that three?' if you can guess)."
                     )
-                elif self._heard_before_us:
+                elif all_before:
                     event = (
                         "The callee spoke just before your latest line started (their words are just "
                         "above it), so it doesn't answer it. Respond to what they said if needed, and "
@@ -871,6 +878,7 @@ class CallSession:
                 turn.say = turn.say or call.brief.opening_line
             if turn.dtmf:
                 call.add_transcript("agent", f"[pressed {turn.dtmf}]")
+                self._since_press, self._last_heard = 0, ""
                 await self._press(turn.dtmf)
             if turn.say and not turn.spoken:
                 await self._say(turn.say)
@@ -950,11 +958,16 @@ class CallSession:
         try:
             return await task
         except asyncio.CancelledError:
-            if not self._superseded:
+            if not self._superseded or asyncio.current_task().cancelling():
+                # The call is being stopped (not just this reply): the turn must
+                # not live on and write to a call that has been wrapped up.
                 raise
             log.info("call %s: they carried on before our reply started; answering all of it", self.call.id)
             return SUPERSEDED
         finally:
+            if not task.done():
+                task.cancel()
+                await settle([task], f"call {self.call.id} pending turn")
             self._superseded = False
             self._pending_turn = None
 
@@ -1105,24 +1118,26 @@ class CallSession:
         return any(who == "agent" and text.removesuffix(" [interrupted]").endswith(opening)
                    for who, text in self.call.transcript)
 
-    def _first_since_press(self, heard: int) -> bool:
-        """What we just heard (the last `heard` callee lines) is the first thing
-        since our key press. Only that can be a person picking up: a recording
-        that has been talking since the press isn't one, however short its next
-        line ("It'll arrive in about three to four weeks.")."""
-        callee = 0
-        for who, text in reversed(self.call.transcript):
-            if who == "agent":
-                return text.startswith("[pressed") and callee <= heard
-            callee += 1
-        return False
-
-    def _after_tones(self, heard: int) -> bool:
-        """What we just heard (the last `heard` callee lines) came straight after
-        hold tones or music ("Beep. Beep." then "Hi, we're with Riverside")."""
-        lines = self.call.transcript
-        i = len(lines) - heard - 1
-        return i >= 0 and lines[i][0] == "callee" and hold_noise(lines[i][1])
+    def _where_heard(self, said: list[str]) -> tuple[bool, bool, bool]:
+        """Where the lines just heard stand in the conversation. A line said
+        before our latest one began is filed above it, so they aren't simply
+        the last lines of the transcript. Returns:
+        - all of it was said before our latest line began (it answers nothing);
+        - it's the first thing since our key press. Only that can be a person
+          picking up: a recording that has been talking since the press isn't
+          one, however short its next line ("It'll arrive in about three to
+          four weeks."), and neither is the menu's last sentence, still being
+          transcribed when we pressed;
+        - it came straight after hold tones or music ("Beep. Beep." then "Hi,
+          we're with Riverside")."""
+        after = self._before.count(False)
+        all_before = after == 0
+        first_since_press = self._since_press == 0 and after > 0
+        after_tones = bool(self._last_heard) and hold_noise(self._last_heard)
+        if self._since_press is not None:
+            self._since_press += after
+        self._last_heard = said[-1]
+        return all_before, first_since_press, after_tones
 
     def _we_spoke_last(self) -> bool:
         return bool(self.call.transcript) and self.call.transcript[-1][0] == "agent"
@@ -1173,8 +1188,7 @@ class CallSession:
                 self._paused_at = None
         if text:
             # Said before our latest line began: it can't answer that line.
-            if self.call.add_transcript("callee", text, at=began):
-                self._heard_before_us = True
+            self._before.append(self.call.add_transcript("callee", text, at=began))
             # Lets the dialog know it may not answer the question we were asking.
             self._heard_over_us = bool(overlapped_line)
         return text
@@ -1202,6 +1216,7 @@ class CallSession:
         rendered while that plays."""
         self._heard_since_we_spoke = []
         self.call.add_transcript("agent", text)
+        self._since_press, self._last_heard = None, ""
         self._speaking_line = text
         self._last_said_at = time.monotonic()
         self._cut = False
@@ -1234,6 +1249,7 @@ class CallSession:
             self._cut = False
             self._heard_since_we_spoke = []
             self.call.add_transcript("agent", sentence)
+            self._since_press, self._last_heard = None, ""
             self._speaking_line = sentence
             self._last_said_at = time.monotonic()
             self._play(pcm)

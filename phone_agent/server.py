@@ -307,6 +307,11 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         Replies "ok", or an error so the dialplan can send the call elsewhere."""
         form = parse_qs((await request.body()).decode(), keep_blank_values=True)
         get = lambda key: form.get(key, [""])[0].strip()
+        token_check = request.scope.get("state", {}).get("token_check")
+        if token_check and not token_check(get("token")):
+            log.warning("Refused POST /inbound: %s", "wrong token" if get("token") else "no token sent")
+            # Plain words: the dialplan compares this reply as a quoted string.
+            return Response("wrong token", status_code=401, media_type="text/plain")
         try:
             call = await manager.register_inbound(get("uuid"), get("caller"), get("diverted"), get("profile") or "screener")
         except (ValueError, RuntimeError) as exc:
@@ -431,8 +436,11 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
         if call["status"] in ("awaiting_approval", "scheduled"):
             due = schedule.get("run_at")
             due_text = f"at {when(due, '%A %d %B, %H:%M')} ({esc(cfg.timezone)})" if due else "as soon as it's approved"
-            questions = "".join(f"<li>{esc(q)}</li>" for q in (brief.get("questions") or {}).values())
+            questions = "".join(f"<li><b>{esc(name)}:</b> {esc(q)}</li>"
+                                for name, q in (brief.get("questions") or {}).items())
             shared = "".join(f"<li>{esc(x)}</li>" for x in brief.get("may_share") or [])
+            forbidden = "".join(f"<li>{esc(x)}</li>" for x in brief.get("must_not") or [])
+            limit = schedule.get("max_seconds")
             details = (
                 f"<p>Dials <b>{esc(call['phone'])}</b> {due_text}.</p>"
                 + (f"<p><b>Ignores calling hours.</b></p>" if schedule.get("ignore_hours") else
@@ -441,7 +449,12 @@ def build_app(cfg: Config, manager: CallManager, db: Database, speech: Speech, d
                 + f"<p><b>Opening line:</b> {esc(brief.get('opening_line') or '')}</p>"
                 f"<p><b>Questions</b></p><ul>{questions}</ul>"
                 + (f"<p><b>May tell them</b></p><ul>{shared}</ul>" if shared else "")
+                + (f"<p><b>Must not</b></p><ul>{forbidden}</ul>" if forbidden else "")
                 + (f"<p><b>Context:</b> {esc(brief['context'])}</p>" if brief.get("context") else "")
+                + (f"<p><b>Goal:</b> {esc(brief['goal'])}</p>" if brief.get("goal") else "")
+                + (f"<p>Time limit: {round(limit / 60)} minutes.</p>" if limit else "")
+                + ("<p>Says the call is recorded if their announcement says so.</p>"
+                   if brief.get("recording_notice") else "")
             )
             if call["status"] == "scheduled":
                 approval = f"<div class='approve'><h2>Scheduled</h2>{details}</div>"

@@ -58,6 +58,12 @@ class TokenAuth:
         if self._valid(presented):
             scope.setdefault("state", {})["approver"] = self._approver(presented)
             return await self.app(scope, receive, send)
+        if path == "/inbound" and scope["method"] == "POST":
+            # The dialplan may send the token as a form field instead of a header
+            # (a header set in the dialplan ends up in Asterisk's log). The route
+            # reads the body and checks it with this.
+            scope.setdefault("state", {}).update(approver=False, token_check=self._valid)
+            return await self.app(scope, receive, send)
         if scope["method"] == "GET" and b"text/html" in headers.get(b"accept", b""):
             target = path + ("?" + scope["query_string"].decode() if scope["query_string"] else "")
             return await _respond(send, 303, b"", [(b"location", f"/login?next={quote(target)}".encode())])
@@ -69,8 +75,10 @@ class TokenAuth:
     async def _login(self, scope, receive, send, headers):
         query = parse_qs(scope["query_string"].decode())
         target = query.get("next", ["/"])[0]
-        if not target.startswith("/") or target.startswith("//"):
-            target = "/"  # only ever send people back into this site
+        if (not target.startswith("/") or target.startswith("//") or "\\" in target
+                or any(ord(ch) < 32 for ch in target)):
+            # Only ever send people back into this site: browsers read "/\\host" as "//host".
+            target = "/"
         error = ""
         if scope["method"] == "POST":
             body = b""

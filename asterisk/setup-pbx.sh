@@ -135,11 +135,19 @@ remove_include() {
     fi
 }
 
+urlencode() {  # for a value inside form data in the dialplan
+    local s=$1 i c
+    for ((i = 0; i < ${#s}; i++)); do
+        c=${s:i:1}
+        case $c in [A-Za-z0-9._~-]) printf '%s' "$c" ;; *) printf '%%%02X' "'$c" ;; esac
+    done
+}
+
 write_file() {  # write_file <path> <mode>; content on stdin
     local tmp; tmp=$(mktemp)
     cat > "$tmp"
     if [ "$DRY" = 1 ]; then
-        echo "  would write $1:"; sed 's/^/      /; s/\(secret\|password\) *=.*/\1 = (hidden)/' "$tmp"; rm -f "$tmp"; return
+        echo "  would write $1:"; sed 's/^/      /; s/\(secret\|password\) *=.*/\1 = (hidden)/; s/token=[^&)]*/token=(hidden)/' "$tmp"; rm -f "$tmp"; return
     fi
     install -m "$2" -o root -g "$(id -gn asterisk 2>/dev/null || echo root)" "$tmp" "$1"
     rm -f "$tmp"
@@ -343,23 +351,24 @@ cat <<'EOF'
 ; [phone-agent-inbound]: tell the agent a call is coming (who, forwarded from
 ; where, which profile), then connect the audio. If the agent is down or busy,
 ; the caller goes to AGENT_FALLBACK, or hears a short apology. The agent's
-; address and token are set here unless globals_custom.conf already has them.
+; address is set here unless globals_custom.conf already has it; the token is
+; in the CURL call below.
 [phone-agent-inbound]
 EOF
 cat <<EOF
 exten => s,1,ExecIf(\$["\${PHONE_AGENT_URL}" = ""]?Set(PHONE_AGENT_URL=http://$AGENT_HOST:$AGENT_PORT))
  same => n,ExecIf(\$["\${PHONE_AGENT_SOCKET}" = ""]?Set(PHONE_AGENT_SOCKET=$AGENT_HOST:$SOCKET_PORT))
- same => n,ExecIf(\$["\${PHONE_AGENT_TOKEN}" = ""]?Set(PHONE_AGENT_TOKEN=$TOKEN))
 EOF
-cat <<'EOF'
+# The token goes inside the CURL call: Asterisk logs every Set() with its values,
+# so a step that sets it would write it to the log on every call.
+sed "s|@TOKEN@|$(urlencode "$TOKEN")|" <<'EOF'
  same => n,Set(AGENT_UUID=${FILTER(0-9a-f-,${SHELL(cat /proc/sys/kernel/random/uuid)})})
  same => n,Set(AGENT_PROFILE=${IF($["${AGENT_PROFILE}" = ""]?screener:${AGENT_PROFILE})})
  same => n,Set(AGENT_DIVERTED=)
  same => n,ExecIf($["${CHANNEL(channeltype)}" = "PJSIP"]?Set(AGENT_DIVERTED=${PJSIP_HEADER(read,Diversion)}))
- same => n,Set(CURLOPT(httpheader)=Authorization: Bearer ${PHONE_AGENT_TOKEN})
  same => n,Set(CURLOPT(conntimeout)=3)
  same => n,Set(CURLOPT(httptimeout)=10)
- same => n,Set(AGENT_REPLY=${CURL(${PHONE_AGENT_URL}/inbound,uuid=${AGENT_UUID}&profile=${AGENT_PROFILE}&caller=${URIENCODE(${CALLERID(num)})}&diverted=${URIENCODE(${AGENT_DIVERTED})})})
+ same => n,Set(AGENT_REPLY=${CURL(${PHONE_AGENT_URL}/inbound,token=@TOKEN@&uuid=${AGENT_UUID}&profile=${AGENT_PROFILE}&caller=${URIENCODE(${CALLERID(num)})}&diverted=${URIENCODE(${AGENT_DIVERTED})})})
  same => n,GotoIf($["${AGENT_REPLY}" != "ok"]?unavailable)
  same => n,Set(CDR(userfield)=phone-agent-in:${AGENT_UUID})
  same => n,Set(AGENT_RECDIR=/var/spool/asterisk/monitor/${STRFTIME(${EPOCH},,%Y/%m/%d)})

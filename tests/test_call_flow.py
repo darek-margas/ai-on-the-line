@@ -311,17 +311,18 @@ def test_only_the_first_words_after_a_key_press_can_be_a_person():
 
     from phone_agent.session import CallSession, answered_after_menu
 
+    def heard(session, *lines):
+        session._before = [False] * len(lines)
+        return session._where_heard(list(lines))
+
     session = CallSession.__new__(CallSession)
-    session.call = SimpleNamespace(transcript=[
-        ("callee", "For card inquiries, press 2."), ("agent", "[pressed 2]"),
-        ("callee", "If you've lost, damaged or need a new Medicare card, you can request us online."),
-        ("callee", "We'll send your new card to the address you've given us."),
-        ("callee", "It'll arrive in about three to four weeks."),
-    ])
+    session._since_press, session._last_heard = 0, ""  # we pressed 2 after "For card inquiries, press 2."
+    heard(session, "If you've lost, damaged or need a new Medicare card, you can request us online.")
+    heard(session, "We'll send your new card to the address you've given us.")
     assert answered_after_menu("It'll arrive in about three to four weeks.")  # short enough on its own
-    assert not session._first_since_press(1)
-    session.call.transcript = [("agent", "[pressed 2]"), ("callee", "Whitegoods, Sam speaking.")]
-    assert session._first_since_press(1)
+    assert not heard(session, "It'll arrive in about three to four weeks.")[1]
+    session._since_press, session._last_heard = 0, ""
+    assert heard(session, "Whitegoods, Sam speaking.")[1]
 
 
 def test_in_a_queue_only_person_cues_skip_the_model():
@@ -335,15 +336,17 @@ def test_in_a_queue_only_person_cues_skip_the_model():
     assert not PERSON_CUE.search("Staff safety is our priority.")
     for line in ("Hello?", "Sam speaking.", "Are you there?"):
         assert PERSON_CUE.search(line), line
+    def heard(session, line):
+        session._before = [False]
+        return session._where_heard([line])
+
     session = CallSession.__new__(CallSession)
-    session.call = SimpleNamespace(transcript=[
-        ("agent", "Operator"),
-        ("callee", "We will remain calm, courteous and respectful and ask the same of you."),
-        ("callee", "Staff safety is our priority.")])
-    assert not session._after_tones(1)
-    session.call.transcript = [("agent", "I'm calling about a lost wallet."), ("callee", "Beep.  Beep."),
-                               ("callee", "Hi, we're with Riverside.")]
-    assert session._after_tones(1)
+    session._since_press, session._last_heard = None, ""  # we said "Operator"
+    heard(session, "We will remain calm, courteous and respectful and ask the same of you.")
+    assert not heard(session, "Staff safety is our priority.")[2]
+    session._since_press, session._last_heard = None, ""  # we said "I'm calling about a lost wallet."
+    heard(session, "Beep.  Beep.")
+    assert heard(session, "Hi, we're with Riverside.")[2]
 
 
 def test_pronunciation_spellings():
